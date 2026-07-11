@@ -1,6 +1,6 @@
 import { VercelResponse } from '@vercel/node';
-import { withAuth, AuthenticatedRequest } from './middleware/auth';
-import { db } from './utils/db';
+import { withAuth, AuthenticatedRequest } from '../lib/auth';
+import { db } from '../lib/db';
 
 // Mock sync state
 let lastSyncTime = new Date();

@@ -26,7 +26,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { pin } = req.body;
+    // Vercel usually parses JSON bodies, but guard against it arriving as a
+    // raw string or being undefined so we never crash with a 500 (which the
+    // frontend would surface as a generic "PIN inválido").
+    let body = req.body;
+    if (typeof body === 'string') {
+      try {
+        body = JSON.parse(body);
+      } catch {
+        body = {};
+      }
+    }
+    const pin = body?.pin;
 
     if (!pin || typeof pin !== 'string') {
       return res.status(400).json({ error: 'PIN is required' });

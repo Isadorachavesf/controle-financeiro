@@ -1,6 +1,6 @@
 import { VercelResponse } from '@vercel/node';
-import { withAuth, AuthenticatedRequest } from './middleware/auth';
-import { db } from './utils/db';
+import { withAuth, AuthenticatedRequest } from '../lib/auth';
+import { db } from '../lib/db';
 
 export default withAuth(async (req: AuthenticatedRequest, res: VercelResponse) => {
   if (req.method !== 'GET') {

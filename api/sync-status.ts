@@ -1,5 +1,5 @@
 import { VercelResponse } from '@vercel/node';
-import { withAuth, AuthenticatedRequest } from './middleware/auth';
+import { withAuth, AuthenticatedRequest } from '../lib/auth';
 
 // Simple mock sync status
 const syncStates: Record<string, any> = {
