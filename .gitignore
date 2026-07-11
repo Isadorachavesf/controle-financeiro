@@ -35,3 +35,4 @@ public/sw.js
 .next
 .nuxt
 build
+credentials.json
