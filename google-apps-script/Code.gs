@@ -1,61 +1,55 @@
 /**
- * Controle Financeiro — Backend (Google Apps Script)
+ * Controle Financeiro — Backend (Google Apps Script)  •  versão 2
  * =================================================================
- * Este script transforma a sua planilha do Google no banco de dados
- * do aplicativo. Ele cria/usa duas abas: "Transacoes" e "Categorias".
+ * Lê e grava nas SUAS abas mensais existentes (ex.: "Julho 2026",
+ * "Junho 2026"...) com as suas colunas:
  *
- * Como publicar:
- *   1. Na planilha: Extensões > Apps Script
- *   2. Apague o conteúdo e cole ESTE arquivo inteiro
- *   3. Salve (ícone de disquete)
- *   4. Implantar > Nova implantação > Tipo: "App da Web"
- *   5. Executar como: "Eu"  |  Quem tem acesso: "Qualquer pessoa"
- *   6. Implantar > copie a URL do App da Web (termina em /exec)
- *   7. Cole essa URL na tela "Sincronizar" do aplicativo
+ *   Código | Data | Compra | Categoria | Forma de pagamento |
+ *   Parcela | Valor | Compra feita por | Data de lançamento
+ *
+ * Os limites de orçamento por categoria ficam numa aba própria do app
+ * ("_Orcamentos"), sem mexer nas suas abas de dados.
+ *
+ * IMPORTANTE ao atualizar este código:
+ *   Depois de colar e salvar, publique uma NOVA VERSÃO:
+ *   Implantar > Gerenciar implantações > (lápis) Editar >
+ *   Versão: "Nova versão" > Implantar.
  * =================================================================
  */
 
-var ABA_TRANSACOES = 'Transacoes';
-var ABA_CATEGORIAS = 'Categorias';
+var ABA_ORCAMENTOS = '_Orcamentos';
+var COLUNAS_ORCAMENTOS = ['nome', 'limiteMensal', 'corGrafico'];
 
-var COLUNAS_TRANSACOES = [
-  'id', 'categoriaId', 'descricao', 'valor', 'dataTransacao',
-  'tipo', 'metodoPagamento', 'notas', 'criadoEm', 'atualizadoEm'
+// Cabeçalho padrão usado ao criar uma aba de mês que ainda não existe.
+var HEADER_PADRAO = [
+  'Código', 'Data', 'Compra', 'Categoria', 'Forma de pagamento',
+  'Parcela', 'Valor', 'Compra feita por', 'Data de lançamento'
 ];
-var COLUNAS_CATEGORIAS = ['id', 'nome', 'limiteMensal', 'corGrafico', 'criadoEm'];
 
-var CATEGORIAS_PADRAO = [
-  { nome: 'Combustível', limiteMensal: 600, corGrafico: '#3b82f6' },
-  { nome: 'Comida', limiteMensal: 800, corGrafico: '#ef4444' },
-  { nome: 'Energia', limiteMensal: 300, corGrafico: '#10b981' },
-  { nome: 'Internet', limiteMensal: 150, corGrafico: '#f59e0b' },
-  { nome: 'Academia', limiteMensal: 200, corGrafico: '#8b5cf6' }
+var MESES_PT = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
 ];
+
+var PALETA = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6',
+              '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16'];
 
 // ---------------------------------------------------------------------------
 // Roteamento HTTP
 // ---------------------------------------------------------------------------
 
-function doGet(e) {
-  return handle(e, 'GET');
-}
-
-function doPost(e) {
-  return handle(e, 'POST');
-}
+function doGet(e) { return handle(e, 'GET'); }
+function doPost(e) { return handle(e, 'POST'); }
 
 function handle(e, metodo) {
   var lock = LockService.getScriptLock();
-  lock.waitLock(20000);
+  lock.waitLock(25000);
   try {
-    inicializar();
-
     var params = (e && e.parameter) || {};
     var corpo = {};
     if (metodo === 'POST' && e && e.postData && e.postData.contents) {
       try { corpo = JSON.parse(e.postData.contents); } catch (err) { corpo = {}; }
     }
-
     var acao = corpo.action || params.action || 'bootstrap';
     var payload = corpo.payload || {};
 
@@ -64,32 +58,15 @@ function handle(e, metodo) {
       case 'bootstrap':
         resultado = { categorias: lerCategorias(), transacoes: lerTransacoes() };
         break;
-      case 'getTransacoes':
-        resultado = lerTransacoes();
-        break;
-      case 'getCategorias':
-        resultado = lerCategorias();
-        break;
-      case 'createTransacao':
-        resultado = criarTransacao(payload);
-        break;
-      case 'updateTransacao':
-        resultado = atualizarTransacao(payload.id, payload);
-        break;
-      case 'deleteTransacao':
-        deletarTransacao(payload.id);
-        resultado = { ok: true };
-        break;
-      case 'createCategoria':
-        resultado = criarCategoria(payload);
-        break;
-      case 'updateCategoria':
-        resultado = atualizarCategoria(payload.id, payload);
-        break;
-      default:
-        resultado = { error: 'Ação desconhecida: ' + acao };
+      case 'getTransacoes': resultado = lerTransacoes(); break;
+      case 'getCategorias': resultado = lerCategorias(); break;
+      case 'createTransacao': resultado = criarTransacao(payload); break;
+      case 'updateTransacao': resultado = atualizarTransacao(payload.id, payload); break;
+      case 'deleteTransacao': deletarTransacao(payload.id); resultado = { ok: true }; break;
+      case 'createCategoria': resultado = upsertCategoria(payload); break;
+      case 'updateCategoria': resultado = upsertCategoria(payload); break;
+      default: resultado = { error: 'Ação desconhecida: ' + acao };
     }
-
     return json({ success: true, data: resultado });
   } catch (erro) {
     return json({ success: false, error: String(erro) });
@@ -99,179 +76,323 @@ function handle(e, metodo) {
 }
 
 function json(obj) {
-  return ContentService
-    .createTextOutput(JSON.stringify(obj))
+  return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
 }
 
 // ---------------------------------------------------------------------------
-// Inicialização (cria abas e cabeçalhos se não existirem)
+// Detecção das abas de dados e mapeamento de colunas
 // ---------------------------------------------------------------------------
 
-function inicializar() {
+function normalizar(s) {
+  return String(s || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
+
+// Descobre quais colunas correspondem a cada campo lógico, pelo cabeçalho.
+function mapearColunas(cabecalho) {
+  var map = {};
+  cabecalho.forEach(function (titulo, i) {
+    var n = normalizar(titulo);
+    if (map.codigo === undefined && n.indexOf('codigo') === 0) map.codigo = i;
+    else if (map.datalanc === undefined && n.indexOf('data de lanc') === 0) map.datalanc = i;
+    else if (map.data === undefined && n === 'data') map.data = i;
+    else if (map.quem === undefined && n.indexOf('feita') >= 0) map.quem = i;
+    else if (map.compra === undefined && n.indexOf('compra') >= 0) map.compra = i;
+    else if (map.categoria === undefined && n.indexOf('categoria') >= 0) map.categoria = i;
+    else if (map.forma === undefined && (n.indexOf('forma') >= 0 || n.indexOf('pagam') >= 0)) map.forma = i;
+    else if (map.parcela === undefined && n.indexOf('parcela') >= 0) map.parcela = i;
+    else if (map.valor === undefined && n.indexOf('valor') >= 0) map.valor = i;
+  });
+  return map;
+}
+
+// Uma aba é "de dados" se o cabeçalho tiver Categoria + Valor + Compra.
+function ehAbaDeDados(map) {
+  return map.categoria !== undefined && map.valor !== undefined && map.compra !== undefined;
+}
+
+function abasDeDados() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  garantirAba(ss, ABA_TRANSACOES, COLUNAS_TRANSACOES);
-  var catSheet = garantirAba(ss, ABA_CATEGORIAS, COLUNAS_CATEGORIAS);
-
-  // Semeia categorias padrão apenas se a aba estiver vazia
-  if (catSheet.getLastRow() < 2) {
-    CATEGORIAS_PADRAO.forEach(function (c) {
-      catSheet.appendRow([gerarId(), c.nome, c.limiteMensal, c.corGrafico, new Date().toISOString()]);
-    });
-  }
-}
-
-function garantirAba(ss, nome, colunas) {
-  var sheet = ss.getSheetByName(nome);
-  if (!sheet) {
-    sheet = ss.insertSheet(nome);
-  }
-  if (sheet.getLastRow() < 1) {
-    sheet.getRange(1, 1, 1, colunas.length).setValues([colunas]);
-    sheet.setFrozenRows(1);
-  }
-  return sheet;
+  return ss.getSheets().filter(function (sheet) {
+    var nome = sheet.getName();
+    if (nome.charAt(0) === '_' || sheet.getLastColumn() < 3 || sheet.getLastRow() < 1) return false;
+    var cab = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    return ehAbaDeDados(mapearColunas(cab));
+  });
 }
 
 // ---------------------------------------------------------------------------
-// Leitura
+// Leitura de transações (de todas as abas mensais)
 // ---------------------------------------------------------------------------
-
-function lerAba(nome, colunas) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(nome);
-  if (!sheet || sheet.getLastRow() < 2) return [];
-  var valores = sheet.getRange(2, 1, sheet.getLastRow() - 1, colunas.length).getValues();
-  return valores
-    .filter(function (linha) { return linha[0] !== '' && linha[0] !== null; })
-    .map(function (linha) {
-      var obj = {};
-      colunas.forEach(function (col, i) { obj[col] = linha[i]; });
-      return obj;
-    });
-}
 
 function lerTransacoes() {
-  return lerAba(ABA_TRANSACOES, COLUNAS_TRANSACOES).map(function (t) {
-    t.valor = Number(t.valor) || 0;
-    t.dataTransacao = formatarData(t.dataTransacao);
-    return t;
+  var out = [];
+  abasDeDados().forEach(function (sheet) {
+    if (sheet.getLastRow() < 2) return;
+    var nome = sheet.getName();
+    var cab = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    var map = mapearColunas(cab);
+    var linhas = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+
+    linhas.forEach(function (linha) {
+      var valorBruto = linha[map.valor];
+      var descricao = map.compra !== undefined ? String(linha[map.compra] || '').trim() : '';
+      if ((valorBruto === '' || valorBruto === null) && descricao === '') return; // linha vazia
+
+      var valorNum = parseValor(valorBruto);
+      if (!valorNum && descricao === '') return;
+
+      var tipo = valorNum < 0 ? 'receita' : 'despesa';
+      var categoria = map.categoria !== undefined ? String(linha[map.categoria] || '').trim() : '';
+      if (!categoria) categoria = 'Sem categoria';
+
+      var codigo = map.codigo !== undefined ? String(linha[map.codigo] || '').trim() : '';
+      var notasPartes = [];
+      if (map.parcela !== undefined && String(linha[map.parcela] || '').trim())
+        notasPartes.push('Parcela ' + String(linha[map.parcela]).trim());
+      if (map.quem !== undefined && String(linha[map.quem] || '').trim())
+        notasPartes.push(String(linha[map.quem]).trim());
+
+      out.push({
+        id: nome + '||' + codigo,
+        categoriaId: categoria,
+        categoriaNome: categoria,
+        descricao: descricao,
+        valor: Math.abs(valorNum),
+        dataTransacao: parseData(map.data !== undefined ? linha[map.data] : ''),
+        tipo: tipo,
+        metodoPagamento: map.forma !== undefined ? String(linha[map.forma] || '').trim() : '',
+        notas: notasPartes.join(' · '),
+        criadoEm: '',
+        atualizadoEm: ''
+      });
+    });
   });
+  return out;
 }
+
+// ---------------------------------------------------------------------------
+// Categorias = nomes distintos dos dados + limites salvos em _Orcamentos
+// ---------------------------------------------------------------------------
 
 function lerCategorias() {
-  return lerAba(ABA_CATEGORIAS, COLUNAS_CATEGORIAS).map(function (c) {
-    c.limiteMensal = Number(c.limiteMensal) || 0;
-    return c;
+  // limites salvos
+  var limites = {};
+  var orc = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ABA_ORCAMENTOS);
+  if (orc && orc.getLastRow() > 1) {
+    orc.getRange(2, 1, orc.getLastRow() - 1, COLUNAS_ORCAMENTOS.length).getValues().forEach(function (l) {
+      var nome = String(l[0] || '').trim();
+      if (nome) limites[nome] = { limiteMensal: Number(l[1]) || 0, corGrafico: l[2] || '' };
+    });
+  }
+
+  // nomes distintos vindos das transações
+  var vistos = {};
+  var nomes = [];
+  lerTransacoes().forEach(function (t) {
+    if (!vistos[t.categoriaId]) { vistos[t.categoriaId] = true; nomes.push(t.categoriaId); }
+  });
+  // inclui categorias que só existem em _Orcamentos
+  Object.keys(limites).forEach(function (nome) {
+    if (!vistos[nome]) { vistos[nome] = true; nomes.push(nome); }
+  });
+
+  return nomes.map(function (nome, i) {
+    var extra = limites[nome] || {};
+    return {
+      id: nome,
+      nome: nome,
+      limiteMensal: extra.limiteMensal || 0,
+      corGrafico: extra.corGrafico || PALETA[i % PALETA.length],
+      criadoEm: ''
+    };
   });
 }
 
+function upsertCategoria(p) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(ABA_ORCAMENTOS);
+  if (!sheet) {
+    sheet = ss.insertSheet(ABA_ORCAMENTOS);
+    sheet.getRange(1, 1, 1, COLUNAS_ORCAMENTOS.length).setValues([COLUNAS_ORCAMENTOS]);
+    sheet.setFrozenRows(1);
+  }
+  var nome = String(p.nome || p.id || '').trim();
+  if (!nome) throw 'Categoria sem nome';
+
+  var linha = -1;
+  if (sheet.getLastRow() > 1) {
+    var nomesCol = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
+    for (var i = 0; i < nomesCol.length; i++) {
+      if (String(nomesCol[i][0]).trim() === nome) { linha = i + 2; break; }
+    }
+  }
+  var cor = p.corGrafico || PALETA[(sheet.getLastRow()) % PALETA.length];
+  var limite = Number(p.limiteMensal) || 0;
+  if (linha === -1) {
+    sheet.appendRow([nome, limite, cor]);
+  } else {
+    var atualCor = sheet.getRange(linha, 3).getValue() || cor;
+    sheet.getRange(linha, 1, 1, 3).setValues([[nome, limite, p.corGrafico || atualCor]]);
+  }
+  return { id: nome, nome: nome, limiteMensal: limite, corGrafico: cor, criadoEm: '' };
+}
+
 // ---------------------------------------------------------------------------
-// Escrita — Transações
+// Escrita de transações nas abas mensais
 // ---------------------------------------------------------------------------
 
+function nomeAbaDoMes(dataISO) {
+  var d = new Date(dataISO + 'T00:00:00');
+  if (isNaN(d.getTime())) d = new Date();
+  return MESES_PT[d.getMonth()] + ' ' + d.getFullYear();
+}
+
+function acharOuCriarAbaMes(dataISO) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var alvo = normalizar(nomeAbaDoMes(dataISO));
+  var abas = abasDeDados();
+  for (var i = 0; i < abas.length; i++) {
+    if (normalizar(abas[i].getName()) === alvo) return abas[i];
+  }
+  // não existe: cria com o cabeçalho de uma aba existente (ou o padrão)
+  var header = abas.length ? abas[0].getRange(1, 1, 1, abas[0].getLastColumn()).getValues()[0] : HEADER_PADRAO;
+  var nova = ss.insertSheet(nomeAbaDoMes(dataISO));
+  nova.getRange(1, 1, 1, header.length).setValues([header]);
+  nova.setFrozenRows(1);
+  return nova;
+}
+
+function proximoCodigo(sheet, map) {
+  if (map.codigo === undefined || sheet.getLastRow() < 2) return 1;
+  var col = sheet.getRange(2, map.codigo + 1, sheet.getLastRow() - 1, 1).getValues();
+  var max = 0;
+  col.forEach(function (l) { var n = parseInt(l[0], 10); if (!isNaN(n) && n > max) max = n; });
+  return max + 1;
+}
+
 function criarTransacao(p) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ABA_TRANSACOES);
-  var agora = new Date().toISOString();
-  var t = {
-    id: gerarId(),
-    categoriaId: p.categoriaId || '',
-    descricao: p.descricao || '',
-    valor: Number(p.valor) || 0,
-    dataTransacao: formatarData(p.dataTransacao),
-    tipo: p.tipo || 'despesa',
-    metodoPagamento: p.metodoPagamento || 'cartao',
-    notas: p.notas || '',
-    criadoEm: agora,
-    atualizadoEm: agora
-  };
-  sheet.appendRow(COLUNAS_TRANSACOES.map(function (c) { return t[c]; }));
-  return t;
+  var sheet = acharOuCriarAbaMes(p.dataTransacao);
+  var cab = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var map = mapearColunas(cab);
+  var codigo = proximoCodigo(sheet, map);
+
+  var linha = new Array(cab.length).fill('');
+  var valorAssinado = (p.tipo === 'receita' ? -1 : 1) * (Number(p.valor) || 0);
+  if (map.codigo !== undefined) linha[map.codigo] = codigo;
+  if (map.data !== undefined) linha[map.data] = formatarDataBR(p.dataTransacao);
+  if (map.compra !== undefined) linha[map.compra] = p.descricao || '';
+  if (map.categoria !== undefined) linha[map.categoria] = p.categoriaId || '';
+  if (map.forma !== undefined) linha[map.forma] = p.metodoPagamento || '';
+  if (map.valor !== undefined) linha[map.valor] = valorAssinado;
+  if (map.quem !== undefined) linha[map.quem] = p.quem || 'Isadora';
+  if (map.datalanc !== undefined) linha[map.datalanc] = formatarDataBR(new Date());
+
+  sheet.appendRow(linha);
+  return montarRetorno(sheet.getName(), codigo, p);
+}
+
+function localizarLinha(id) {
+  var partes = String(id).split('||');
+  var nomeAba = partes[0];
+  var codigo = partes[1];
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(nomeAba);
+  if (!sheet || sheet.getLastRow() < 2) return null;
+  var cab = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var map = mapearColunas(cab);
+  if (map.codigo === undefined) return null;
+  var col = sheet.getRange(2, map.codigo + 1, sheet.getLastRow() - 1, 1).getValues();
+  for (var i = 0; i < col.length; i++) {
+    if (String(col[i][0]).trim() === String(codigo).trim()) {
+      return { sheet: sheet, map: map, row: i + 2, cab: cab };
+    }
+  }
+  return null;
 }
 
 function atualizarTransacao(id, p) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ABA_TRANSACOES);
-  var linha = encontrarLinha(sheet, id);
-  if (linha === -1) throw 'Transação não encontrada';
+  var loc = localizarLinha(id);
+  if (!loc) throw 'Transação não encontrada';
+  var range = loc.sheet.getRange(loc.row, 1, 1, loc.cab.length);
+  var linha = range.getValues()[0];
+  var map = loc.map;
 
-  var atual = {};
-  var valores = sheet.getRange(linha, 1, 1, COLUNAS_TRANSACOES.length).getValues()[0];
-  COLUNAS_TRANSACOES.forEach(function (c, i) { atual[c] = valores[i]; });
+  if (p.descricao !== undefined && map.compra !== undefined) linha[map.compra] = p.descricao;
+  if (p.categoriaId !== undefined && map.categoria !== undefined) linha[map.categoria] = p.categoriaId;
+  if (p.metodoPagamento !== undefined && map.forma !== undefined) linha[map.forma] = p.metodoPagamento;
+  if (p.dataTransacao !== undefined && map.data !== undefined) linha[map.data] = formatarDataBR(p.dataTransacao);
+  if (p.valor !== undefined && map.valor !== undefined) {
+    var tipo = p.tipo || (parseValor(linha[map.valor]) < 0 ? 'receita' : 'despesa');
+    linha[map.valor] = (tipo === 'receita' ? -1 : 1) * (Number(p.valor) || 0);
+  }
+  range.setValues([linha]);
 
-  ['categoriaId', 'descricao', 'valor', 'dataTransacao', 'tipo', 'metodoPagamento', 'notas'].forEach(function (campo) {
-    if (p[campo] !== undefined) atual[campo] = p[campo];
-  });
-  atual.valor = Number(atual.valor) || 0;
-  atual.dataTransacao = formatarData(atual.dataTransacao);
-  atual.atualizadoEm = new Date().toISOString();
-
-  sheet.getRange(linha, 1, 1, COLUNAS_TRANSACOES.length)
-    .setValues([COLUNAS_TRANSACOES.map(function (c) { return atual[c]; })]);
-  return atual;
+  var codigo = String(id).split('||')[1];
+  return montarRetorno(loc.sheet.getName(), codigo, p);
 }
 
 function deletarTransacao(id) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ABA_TRANSACOES);
-  var linha = encontrarLinha(sheet, id);
-  if (linha !== -1) sheet.deleteRow(linha);
+  var loc = localizarLinha(id);
+  if (loc) loc.sheet.deleteRow(loc.row);
 }
 
-// ---------------------------------------------------------------------------
-// Escrita — Categorias
-// ---------------------------------------------------------------------------
-
-function criarCategoria(p) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ABA_CATEGORIAS);
-  var c = {
-    id: gerarId(),
-    nome: p.nome || '',
-    limiteMensal: Number(p.limiteMensal) || 0,
-    corGrafico: p.corGrafico || '#3b82f6',
-    criadoEm: new Date().toISOString()
+function montarRetorno(nomeAba, codigo, p) {
+  return {
+    id: nomeAba + '||' + codigo,
+    categoriaId: p.categoriaId || '',
+    categoriaNome: p.categoriaId || '',
+    descricao: p.descricao || '',
+    valor: Math.abs(Number(p.valor) || 0),
+    dataTransacao: p.dataTransacao || '',
+    tipo: p.tipo || 'despesa',
+    metodoPagamento: p.metodoPagamento || '',
+    notas: p.notas || '',
+    criadoEm: new Date().toISOString(),
+    atualizadoEm: new Date().toISOString()
   };
-  sheet.appendRow(COLUNAS_CATEGORIAS.map(function (col) { return c[col]; }));
-  return c;
-}
-
-function atualizarCategoria(id, p) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ABA_CATEGORIAS);
-  var linha = encontrarLinha(sheet, id);
-  if (linha === -1) throw 'Categoria não encontrada';
-
-  var atual = {};
-  var valores = sheet.getRange(linha, 1, 1, COLUNAS_CATEGORIAS.length).getValues()[0];
-  COLUNAS_CATEGORIAS.forEach(function (c, i) { atual[c] = valores[i]; });
-
-  ['nome', 'limiteMensal', 'corGrafico'].forEach(function (campo) {
-    if (p[campo] !== undefined) atual[campo] = p[campo];
-  });
-  atual.limiteMensal = Number(atual.limiteMensal) || 0;
-
-  sheet.getRange(linha, 1, 1, COLUNAS_CATEGORIAS.length)
-    .setValues([COLUNAS_CATEGORIAS.map(function (c) { return atual[c]; })]);
-  return atual;
 }
 
 // ---------------------------------------------------------------------------
-// Utilidades
+// Conversões de valor e data (formato brasileiro)
 // ---------------------------------------------------------------------------
 
-function encontrarLinha(sheet, id) {
-  if (sheet.getLastRow() < 2) return -1;
-  var ids = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
-  for (var i = 0; i < ids.length; i++) {
-    if (String(ids[i][0]) === String(id)) return i + 2;
-  }
-  return -1;
+function parseValor(v) {
+  if (typeof v === 'number') return v;
+  var s = String(v || '').replace(/r\$/i, '').replace(/\s/g, '');
+  if (!s) return 0;
+  var negativo = s.indexOf('-') >= 0 || (s.indexOf('(') >= 0 && s.indexOf(')') >= 0);
+  s = s.replace(/[()\-]/g, '');
+  // remove separador de milhar (.) e troca vírgula decimal por ponto
+  if (s.indexOf(',') >= 0) s = s.replace(/\./g, '').replace(',', '.');
+  var n = parseFloat(s);
+  if (isNaN(n)) return 0;
+  return negativo ? -n : n;
 }
 
-function gerarId() {
-  return Utilities.getUuid();
+function parseData(v) {
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+  var s = String(v || '').trim();
+  // dd/mm/yyyy  ou  dd/mm/yy
+  var m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (m) {
+    var ano = m[3].length === 2 ? '20' + m[3] : m[3];
+    return ano + '-' + pad2(m[2]) + '-' + pad2(m[1]);
+  }
+  // yyyy-mm-dd (já ok)
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.substring(0, 10);
+  return s;
 }
 
-function formatarData(valor) {
-  if (valor instanceof Date) {
-    return Utilities.formatDate(valor, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  }
-  var s = String(valor || '');
-  return s.length >= 10 ? s.substring(0, 10) : s;
+function formatarDataBR(v) {
+  var iso = parseData(v);
+  var m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return m[3] + '/' + m[2] + '/' + m[1];
+  return iso;
 }
+
+function pad2(n) { n = String(n); return n.length < 2 ? '0' + n : n; }
