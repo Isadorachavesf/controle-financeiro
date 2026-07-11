@@ -111,7 +111,7 @@ export function PinAuthScreen({ onAuthenticate, isLoading, error }: PinAuthScree
         </form>
 
         <p className="text-center text-gray-600 text-sm mt-6">
-          Versão 1.0.0 • Isadora Silva
+          Versão 1.0.0 • Isadora Chaves
         </p>
       </div>
     </div>

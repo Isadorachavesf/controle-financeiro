@@ -166,7 +166,7 @@ A sincronização ocorre automaticamente a cada 30 minutos (configurável):
 
 ## 📞 Contato
 
-Desenvolvido para Isadora Silva
+Desenvolvido para Isadora Chaves
 Email: isadorachavesf@gmail.com
 
 ## 📄 Licença
