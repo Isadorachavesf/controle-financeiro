@@ -13,7 +13,6 @@ export default defineConfig({
       '@': `${__dirname}/src`,
       '@components': `${__dirname}/src/components`,
       '@screens': `${__dirname}/src/screens`,
-      '@types': `${__dirname}/src/types`,
       '@hooks': `${__dirname}/src/hooks`,
       '@services': `${__dirname}/src/services`,
       '@utils': `${__dirname}/src/utils`,
@@ -22,11 +21,5 @@ export default defineConfig({
   server: {
     port: 5173,
     open: true,
-    proxy: {
-      '/api': {
-        target: 'http://localhost:3000',
-        changeOrigin: true,
-      },
-    },
   },
 })

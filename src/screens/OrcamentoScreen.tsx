@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Categoria } from '@types/index';
+import { Categoria } from '@/types/index';
 import { apiService } from '@services/api';
 
 export function OrcamentoScreen() {

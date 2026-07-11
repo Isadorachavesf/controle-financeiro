@@ -4,7 +4,6 @@ interface LayoutProps {
   children: ReactNode;
   currentScreen: 'dashboard' | 'transacoes' | 'orcamento' | 'sincronizacao';
   onNavigate: (screen: string) => void;
-  onLogout: () => void;
   syncStatus?: 'idle' | 'syncing' | 'success' | 'error';
 }
 
@@ -12,7 +11,6 @@ export function Layout({
   children,
   currentScreen,
   onNavigate,
-  onLogout,
   syncStatus = 'idle',
 }: LayoutProps) {
   const NavLink = ({
@@ -59,12 +57,6 @@ export function Layout({
             {syncStatus === 'error' && (
               <span className="text-sm text-red-600 hidden sm:inline">✗ Erro na sync</span>
             )}
-            <button
-              onClick={onLogout}
-              className="text-sm font-medium text-gray-600 hover:text-gray-900 px-3 py-2 rounded-lg hover:bg-gray-100 transition"
-            >
-              Sair
-            </button>
           </div>
         </div>
       </header>

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { DashboardData, Transacao } from '@types/index';
+import { DashboardData, Transacao } from '@/types/index';
 import { apiService } from '@services/api';
 
 export function DashboardScreen() {

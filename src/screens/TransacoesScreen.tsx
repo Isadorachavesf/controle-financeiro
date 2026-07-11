@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Transacao, Categoria } from '@types/index';
+import { Transacao, Categoria } from '@/types/index';
 import { apiService } from '@services/api';
 import { TransacaoForm } from '@components/TransacaoForm';
 import { TransacaoTable } from '@components/TransacaoTable';

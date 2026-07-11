@@ -1,5 +1,5 @@
 import React from 'react';
-import { Transacao, Categoria } from '@types/index';
+import { Transacao, Categoria } from '@/types/index';
 
 interface TransacaoTableProps {
   transacoes: Transacao[];

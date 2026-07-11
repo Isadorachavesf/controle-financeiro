@@ -1,108 +1,334 @@
-import axios, { AxiosInstance } from 'axios';
-import { Transacao, Categoria, DashboardData, SincronizacaoStatus } from '@types/index';
+import { Transacao, Categoria, DashboardData, SincronizacaoStatus } from '@/types/index';
 
-const API_BASE_URL = process.env.VITE_API_URL || '/api';
+// ---------------------------------------------------------------------------
+// Camada de dados do aplicativo.
+//
+// Dois modos, com a MESMA interface para as telas:
+//
+//  • Conectado à planilha: quando a URL do Google Apps Script está configurada,
+//    a planilha do Google é a fonte de verdade. Leituras buscam da planilha;
+//    escritas vão para a planilha. Um cache em localStorage mantém o app
+//    utilizável mesmo sem internet.
+//
+//  • Local (sem conexão): se a URL não estiver configurada, os dados ficam
+//    apenas no navegador (localStorage). O app funciona na hora e a conexão
+//    com a planilha pode ser feita depois, na tela "Sincronizar".
+// ---------------------------------------------------------------------------
+
+const STORAGE_KEYS = {
+  transacoes: 'cf_transacoes',
+  categorias: 'cf_categorias',
+  appsScriptUrl: 'cf_apps_script_url',
+};
+
+const CATEGORIAS_PADRAO: Categoria[] = [
+  { id: '1', nome: 'Combustível', limiteMensal: 600, corGrafico: '#3b82f6', criadoEm: new Date().toISOString() },
+  { id: '2', nome: 'Comida', limiteMensal: 800, corGrafico: '#ef4444', criadoEm: new Date().toISOString() },
+  { id: '3', nome: 'Energia', limiteMensal: 300, corGrafico: '#10b981', criadoEm: new Date().toISOString() },
+  { id: '4', nome: 'Internet', limiteMensal: 150, corGrafico: '#f59e0b', criadoEm: new Date().toISOString() },
+  { id: '5', nome: 'Academia', limiteMensal: 200, corGrafico: '#8b5cf6', criadoEm: new Date().toISOString() },
+];
+
+const CACHE_TTL_MS = 8000;
+
+function gerarId(): string {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+// --- Configuração da conexão com a planilha ---
+export function getAppsScriptUrl(): string {
+  return localStorage.getItem(STORAGE_KEYS.appsScriptUrl) || '';
+}
+export function setAppsScriptUrl(url: string): void {
+  const limpa = url.trim();
+  if (limpa) localStorage.setItem(STORAGE_KEYS.appsScriptUrl, limpa);
+  else localStorage.removeItem(STORAGE_KEYS.appsScriptUrl);
+  cache.loadedAt = 0; // invalida cache ao (des)conectar
+}
+export function isConectado(): boolean {
+  return !!getAppsScriptUrl();
+}
+
+// --- Cache local ---
+interface Cache {
+  categorias: Categoria[];
+  transacoes: Transacao[];
+  loadedAt: number;
+}
+const cache: Cache = { categorias: [], transacoes: [], loadedAt: 0 };
+
+function lerCacheLocal(): { categorias: Categoria[]; transacoes: Transacao[] } {
+  let categorias: Categoria[];
+  try {
+    categorias = JSON.parse(localStorage.getItem(STORAGE_KEYS.categorias) || '');
+    if (!Array.isArray(categorias) || categorias.length === 0) categorias = [...CATEGORIAS_PADRAO];
+  } catch {
+    categorias = [...CATEGORIAS_PADRAO];
+  }
+  let transacoes: Transacao[];
+  try {
+    transacoes = JSON.parse(localStorage.getItem(STORAGE_KEYS.transacoes) || '[]');
+    if (!Array.isArray(transacoes)) transacoes = [];
+  } catch {
+    transacoes = [];
+  }
+  return { categorias, transacoes };
+}
+
+function salvarCacheLocal(): void {
+  localStorage.setItem(STORAGE_KEYS.categorias, JSON.stringify(cache.categorias));
+  localStorage.setItem(STORAGE_KEYS.transacoes, JSON.stringify(cache.transacoes));
+}
+
+// --- Comunicação com o Apps Script ---
+async function chamarRemoto(action: string, payload?: any): Promise<any> {
+  const url = getAppsScriptUrl();
+  if (!url) throw new Error('Planilha não conectada');
+
+  const isLeitura = action === 'bootstrap' || action.startsWith('get');
+  let resp: Response;
+  if (isLeitura) {
+    resp = await fetch(`${url}?action=${encodeURIComponent(action)}&t=${Date.now()}`, {
+      method: 'GET',
+      redirect: 'follow',
+    });
+  } else {
+    // text/plain evita a verificação CORS (preflight), que o Apps Script não trata.
+    resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action, payload }),
+      redirect: 'follow',
+    });
+  }
+
+  if (!resp.ok) throw new Error(`Erro de rede (${resp.status})`);
+  const data = await resp.json();
+  if (!data.success) throw new Error(data.error || 'Erro no servidor da planilha');
+  return data.data;
+}
+
+// Garante que o cache está carregado. Em modo conectado, busca da planilha
+// quando o cache está velho; em falha de rede, usa o cache local.
+async function garantirCarregado(forcar = false): Promise<void> {
+  const agora = Date.now();
+  if (!forcar && cache.loadedAt && agora - cache.loadedAt < CACHE_TTL_MS) return;
+
+  if (isConectado()) {
+    try {
+      const remoto = await chamarRemoto('bootstrap');
+      cache.categorias = remoto.categorias || [];
+      cache.transacoes = remoto.transacoes || [];
+      cache.loadedAt = agora;
+      salvarCacheLocal();
+      return;
+    } catch (e) {
+      // Sem internet ou erro: usa o cache local como plano B.
+      const local = lerCacheLocal();
+      cache.categorias = local.categorias;
+      cache.transacoes = local.transacoes;
+      cache.loadedAt = agora;
+      throw e;
+    }
+  }
+
+  const local = lerCacheLocal();
+  cache.categorias = local.categorias;
+  cache.transacoes = local.transacoes;
+  cache.loadedAt = agora;
+}
+
+// Carrega ignorando erros de rede (para leituras não quebrarem a tela).
+async function carregarSeguro(forcar = false): Promise<void> {
+  try {
+    await garantirCarregado(forcar);
+  } catch {
+    /* já preencheu com cache local */
+  }
+}
+
+function comNomeCategoria(tx: Transacao): Transacao {
+  const cat = cache.categorias.find((c) => c.id === tx.categoriaId);
+  return { ...tx, categoriaNome: cat?.nome };
+}
 
 class ApiService {
-  private api: AxiosInstance;
+  // Exponibiliza estado da conexão para as telas
+  isConectado = isConectado;
+  getAppsScriptUrl = getAppsScriptUrl;
 
-  constructor() {
-    this.api = axios.create({
-      baseURL: API_BASE_URL,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    // Add token to requests if available
-    this.api.interceptors.request.use((config) => {
-      const token = localStorage.getItem('auth_token');
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
-      return config;
-    });
+  async conectarPlanilha(url: string): Promise<void> {
+    setAppsScriptUrl(url);
+    await garantirCarregado(true); // valida a URL buscando dados
   }
 
-  // Auth
-  async verifyPin(pin: string): Promise<{ success: boolean; token?: string; expiresIn?: number }> {
-    const response = await this.api.post('/verify-pin', { pin });
-    if (response.data.token) {
-      localStorage.setItem('auth_token', response.data.token);
-      localStorage.setItem('token_expires_at', String(Date.now() + (response.data.expiresIn || 900000)));
-    }
-    return response.data;
+  desconectarPlanilha(): void {
+    setAppsScriptUrl('');
   }
 
-  logout(): void {
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('token_expires_at');
-  }
-
-  isTokenValid(): boolean {
-    const expiresAt = localStorage.getItem('token_expires_at');
-    if (!expiresAt) return false;
-    return Date.now() < parseInt(expiresAt, 10);
-  }
-
-  // Transacoes
+  // --- Transacoes ---
   async getTransacoes(mes?: number, ano?: number, categoriaId?: string): Promise<Transacao[]> {
-    const params = new URLSearchParams();
-    if (mes !== undefined) params.append('mes', String(mes));
-    if (ano !== undefined) params.append('ano', String(ano));
-    if (categoriaId) params.append('categoria_id', categoriaId);
-
-    const response = await this.api.get('/transacoes', { params });
-    return response.data;
+    await carregarSeguro();
+    let txs = cache.transacoes;
+    if (mes !== undefined && ano !== undefined) {
+      txs = txs.filter((t) => {
+        const d = new Date(t.dataTransacao + 'T00:00:00');
+        return d.getMonth() === mes - 1 && d.getFullYear() === ano;
+      });
+    }
+    if (categoriaId) txs = txs.filter((t) => t.categoriaId === categoriaId);
+    return txs
+      .slice()
+      .sort((a, b) => new Date(b.dataTransacao).getTime() - new Date(a.dataTransacao).getTime())
+      .map(comNomeCategoria);
   }
 
   async createTransacao(data: Omit<Transacao, 'id' | 'criadoEm' | 'atualizadoEm'>): Promise<Transacao> {
-    const response = await this.api.post('/transacoes', data);
-    return response.data;
+    await carregarSeguro();
+    let tx: Transacao;
+    if (isConectado()) {
+      tx = await chamarRemoto('createTransacao', data);
+    } else {
+      const now = new Date().toISOString();
+      tx = { ...(data as any), id: gerarId(), criadoEm: now, atualizadoEm: now };
+    }
+    cache.transacoes.push(tx);
+    salvarCacheLocal();
+    return comNomeCategoria(tx);
   }
 
   async updateTransacao(id: string, data: Partial<Transacao>): Promise<Transacao> {
-    const response = await this.api.put(`/transacoes/${id}`, data);
-    return response.data;
+    await carregarSeguro();
+    const idx = cache.transacoes.findIndex((t) => t.id === id);
+    let tx: Transacao;
+    if (isConectado()) {
+      tx = await chamarRemoto('updateTransacao', { id, ...data });
+    } else {
+      if (idx === -1) throw new Error('Transação não encontrada');
+      tx = { ...cache.transacoes[idx], ...data, id, atualizadoEm: new Date().toISOString() };
+    }
+    if (idx === -1) cache.transacoes.push(tx);
+    else cache.transacoes[idx] = tx;
+    salvarCacheLocal();
+    return comNomeCategoria(tx);
   }
 
   async deleteTransacao(id: string): Promise<void> {
-    await this.api.delete(`/transacoes/${id}`);
+    await carregarSeguro();
+    if (isConectado()) await chamarRemoto('deleteTransacao', { id });
+    cache.transacoes = cache.transacoes.filter((t) => t.id !== id);
+    salvarCacheLocal();
   }
 
-  // Categorias
+  // --- Categorias ---
   async getCategorias(): Promise<Categoria[]> {
-    const response = await this.api.get('/categorias');
-    return response.data;
+    await carregarSeguro();
+    return cache.categorias.slice();
   }
 
   async createCategoria(data: Omit<Categoria, 'id' | 'criadoEm'>): Promise<Categoria> {
-    const response = await this.api.post('/categorias', data);
-    return response.data;
+    await carregarSeguro();
+    let cat: Categoria;
+    if (isConectado()) {
+      cat = await chamarRemoto('createCategoria', data);
+    } else {
+      cat = { ...(data as any), id: gerarId(), criadoEm: new Date().toISOString() };
+    }
+    cache.categorias.push(cat);
+    salvarCacheLocal();
+    return cat;
   }
 
   async updateCategoria(id: string, data: Partial<Categoria>): Promise<Categoria> {
-    const response = await this.api.put(`/categorias/${id}`, data);
-    return response.data;
+    await carregarSeguro();
+    const idx = cache.categorias.findIndex((c) => c.id === id);
+    let cat: Categoria;
+    if (isConectado()) {
+      cat = await chamarRemoto('updateCategoria', { id, ...data });
+    } else {
+      if (idx === -1) throw new Error('Categoria não encontrada');
+      cat = { ...cache.categorias[idx], ...data, id };
+    }
+    if (idx === -1) cache.categorias.push(cat);
+    else cache.categorias[idx] = cat;
+    salvarCacheLocal();
+    return cat;
   }
 
-  // Dashboard
+  // --- Dashboard ---
   async getDashboard(mes: number, ano: number): Promise<DashboardData> {
-    const response = await this.api.get('/dashboard', {
-      params: { mes, ano },
+    await carregarSeguro();
+    const txsMes = cache.transacoes.filter((t) => {
+      const d = new Date(t.dataTransacao + 'T00:00:00');
+      return d.getMonth() === mes - 1 && d.getFullYear() === ano;
     });
-    return response.data;
+
+    const totalReceitas = txsMes.filter((t) => t.tipo === 'receita').reduce((s, t) => s + t.valor, 0);
+    const totalDespesas = txsMes.filter((t) => t.tipo === 'despesa').reduce((s, t) => s + t.valor, 0);
+
+    const porCategoria = cache.categorias.map((categoria) => {
+      const gasto = txsMes
+        .filter((t) => t.categoriaId === categoria.id && t.tipo === 'despesa')
+        .reduce((s, t) => s + t.valor, 0);
+      return {
+        categoria,
+        gasto,
+        percentualDoLimite: categoria.limiteMensal > 0 ? (gasto / categoria.limiteMensal) * 100 : 0,
+      };
+    });
+
+    const alertas = porCategoria
+      .filter((item) => item.percentualDoLimite >= 80)
+      .map((item) => ({
+        categoriaId: item.categoria.id,
+        categoriaNome: item.categoria.nome,
+        percentual: item.percentualDoLimite,
+        limite: item.categoria.limiteMensal,
+        gasto: item.gasto,
+      }));
+
+    const ultimasTransacoes = txsMes
+      .slice()
+      .sort((a, b) => new Date(b.dataTransacao).getTime() - new Date(a.dataTransacao).getTime())
+      .slice(0, 5)
+      .map(comNomeCategoria);
+
+    return {
+      mes,
+      ano,
+      totalReceitas,
+      totalDespesas,
+      saldo: totalReceitas - totalDespesas,
+      porCategoria,
+      alertas,
+      ultimasTransacoes,
+    };
   }
 
-  // Sincronizacao
+  // --- Sincronização ---
   async triggerSync(): Promise<SincronizacaoStatus> {
-    const response = await this.api.post('/sync-sheets');
-    return response.data;
+    try {
+      await garantirCarregado(true); // força buscar da planilha
+      return {
+        status: 'sucesso',
+        ultimaSincronizacao: new Date().toISOString(),
+        transacoesSincronizadas: cache.transacoes.length,
+      };
+    } catch (e: any) {
+      return {
+        status: 'erro',
+        ultimaSincronizacao: new Date().toISOString(),
+        motivoErro: e?.message || 'Falha ao sincronizar',
+      };
+    }
   }
 
   async getSyncStatus(): Promise<SincronizacaoStatus> {
-    const response = await this.api.get('/sync-status');
-    return response.data;
+    return {
+      status: isConectado() ? 'sucesso' : 'pendente',
+      ultimaSincronizacao: cache.loadedAt ? new Date(cache.loadedAt).toISOString() : undefined,
+      transacoesSincronizadas: cache.transacoes.length,
+    };
   }
 }
 

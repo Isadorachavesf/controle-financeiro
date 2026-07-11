@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Transacao, Categoria } from '@types/index';
+import { Transacao, Categoria } from '@/types/index';
 
 interface TransacaoFormProps {
   transacao?: Transacao;
