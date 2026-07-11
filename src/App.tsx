@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@hooks/useAuth';
-import { PinAuthScreen } from '@components/PinAuthScreen';
-import { Layout } from '@components/Layout';
+import { PinAuthScreen, Layout } from '@components/index';
+import { DashboardScreen, TransacoesScreen, OrcamentoScreen, SincronizacaoScreen } from '@screens/index';
 
 type Screen = 'dashboard' | 'transacoes' | 'orcamento' | 'sincronizacao';
 
@@ -75,50 +75,10 @@ function App() {
       onLogout={handleLogout}
       syncStatus={syncStatus}
     >
-      {/* Screen Content */}
-      {currentScreen === 'dashboard' && (
-        <div className="space-y-8">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-white rounded-lg shadow p-6">
-              <p className="text-gray-600 text-sm">Receitas (Junho 2026)</p>
-              <p className="text-3xl font-bold text-green-600 mt-2">R$ 0,00</p>
-            </div>
-            <div className="bg-white rounded-lg shadow p-6">
-              <p className="text-gray-600 text-sm">Despesas (Junho 2026)</p>
-              <p className="text-3xl font-bold text-red-600 mt-2">R$ 0,00</p>
-            </div>
-            <div className="bg-white rounded-lg shadow p-6">
-              <p className="text-gray-600 text-sm">Saldo</p>
-              <p className="text-3xl font-bold text-blue-600 mt-2">R$ 0,00</p>
-            </div>
-          </div>
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold mb-4">Gráficos em desenvolvimento...</h2>
-            <p className="text-gray-600">Os gráficos serão renderizados aqui</p>
-          </div>
-        </div>
-      )}
-
-      {currentScreen === 'transacoes' && (
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold mb-4">Transações</h2>
-          <p className="text-gray-600">Tela de transações em desenvolvimento...</p>
-        </div>
-      )}
-
-      {currentScreen === 'orcamento' && (
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold mb-4">Orçamento</h2>
-          <p className="text-gray-600">Tela de orçamento em desenvolvimento...</p>
-        </div>
-      )}
-
-      {currentScreen === 'sincronizacao' && (
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold mb-4">Sincronização Google Sheets</h2>
-          <p className="text-gray-600">Status de sincronização em desenvolvimento...</p>
-        </div>
-      )}
+      {currentScreen === 'dashboard' && <DashboardScreen />}
+      {currentScreen === 'transacoes' && <TransacoesScreen />}
+      {currentScreen === 'orcamento' && <OrcamentoScreen />}
+      {currentScreen === 'sincronizacao' && <SincronizacaoScreen />}
     </Layout>
   );
 }
