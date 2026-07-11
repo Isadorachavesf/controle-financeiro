@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '💰 Sistema de Controle Financeiro - Isadora' && echo 'Status: Desenvolvimento em andamento'",
+            "statusMessage": "Iniciando sessão de desenvolvimento"
+          }
+        ]
+      }
+    ]
+  }
+}
