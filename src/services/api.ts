@@ -152,6 +152,15 @@ function comNomeCategoria(tx: Transacao): Transacao {
   return { ...tx, categoriaNome: cat?.nome };
 }
 
+// Mês de referência de uma transação: usa a competência (aba da planilha)
+// quando existe; senão, o mês da data. Assim os totais batem com as abas.
+export function competenciaDe(tx: Transacao): string {
+  return tx.competencia || (tx.dataTransacao ? tx.dataTransacao.slice(0, 7) : '');
+}
+function pertenceAo(tx: Transacao, mes: number, ano: number): boolean {
+  return competenciaDe(tx) === `${ano}-${String(mes).padStart(2, '0')}`;
+}
+
 class ApiService {
   // Exponibiliza estado da conexão para as telas
   isConectado = isConectado;
@@ -171,10 +180,7 @@ class ApiService {
     await carregarSeguro();
     let txs = cache.transacoes;
     if (mes !== undefined && ano !== undefined) {
-      txs = txs.filter((t) => {
-        const d = new Date(t.dataTransacao + 'T00:00:00');
-        return d.getMonth() === mes - 1 && d.getFullYear() === ano;
-      });
+      txs = txs.filter((t) => pertenceAo(t, mes, ano));
     }
     if (categoriaId) txs = txs.filter((t) => t.categoriaId === categoriaId);
     return txs
@@ -258,10 +264,7 @@ class ApiService {
   // --- Dashboard ---
   async getDashboard(mes: number, ano: number): Promise<DashboardData> {
     await carregarSeguro();
-    const txsMes = cache.transacoes.filter((t) => {
-      const d = new Date(t.dataTransacao + 'T00:00:00');
-      return d.getMonth() === mes - 1 && d.getFullYear() === ano;
-    });
+    const txsMes = cache.transacoes.filter((t) => pertenceAo(t, mes, ano));
 
     const totalReceitas = txsMes.filter((t) => t.tipo === 'receita').reduce((s, t) => s + t.valor, 0);
     const totalDespesas = txsMes.filter((t) => t.tipo === 'despesa').reduce((s, t) => s + t.valor, 0);

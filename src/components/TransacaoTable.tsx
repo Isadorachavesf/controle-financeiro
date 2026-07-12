@@ -50,7 +50,7 @@ export function TransacaoTable({ transacoes, categorias, onEdit, onDelete }: Tra
                 </td>
                 <td className="px-4 py-3 text-sm text-right font-medium">
                   <span className={tx.tipo === 'receita' ? 'text-green-600' : 'text-red-600'}>
-                    {tx.tipo === 'receita' ? '+' : '-'} R$ {tx.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    {tx.tipo === 'receita' ? '+' : '-'} R$ {tx.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-sm text-center">

@@ -128,11 +128,24 @@ function abasDeDados() {
 // Leitura de transações (de todas as abas mensais)
 // ---------------------------------------------------------------------------
 
+// Extrai a competência (YYYY-MM) a partir do nome da aba, ex.: "Julho 2026".
+function competenciaDaAba(nomeAba) {
+  var n = normalizar(nomeAba);
+  for (var i = 0; i < MESES_PT.length; i++) {
+    if (n.indexOf(normalizar(MESES_PT[i])) >= 0) {
+      var ano = (nomeAba.match(/(20\d{2})/) || [])[1];
+      if (ano) return ano + '-' + pad2(i + 1);
+    }
+  }
+  return '';
+}
+
 function lerTransacoes() {
   var out = [];
   abasDeDados().forEach(function (sheet) {
     if (sheet.getLastRow() < 2) return;
     var nome = sheet.getName();
+    var competencia = competenciaDaAba(nome);
     var cab = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     var map = mapearColunas(cab);
     var linhas = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
@@ -163,6 +176,7 @@ function lerTransacoes() {
         descricao: descricao,
         valor: Math.abs(valorNum),
         dataTransacao: parseData(map.data !== undefined ? linha[map.data] : ''),
+        competencia: competencia,
         tipo: tipo,
         metodoPagamento: map.forma !== undefined ? String(linha[map.forma] || '').trim() : '',
         notas: notasPartes.join(' · '),
@@ -347,6 +361,7 @@ function montarRetorno(nomeAba, codigo, p) {
     descricao: p.descricao || '',
     valor: Math.abs(Number(p.valor) || 0),
     dataTransacao: p.dataTransacao || '',
+    competencia: competenciaDaAba(nomeAba) || (p.dataTransacao ? String(p.dataTransacao).substring(0, 7) : ''),
     tipo: p.tipo || 'despesa',
     metodoPagamento: p.metodoPagamento || '',
     notas: p.notas || '',

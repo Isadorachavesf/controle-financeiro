@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { DashboardData, Transacao } from '@/types/index';
-import { apiService } from '@services/api';
+import { apiService, competenciaDe } from '@services/api';
 
 export function DashboardScreen() {
   const [data, setData] = useState<DashboardData | null>(null);
+  const [todasTransacoes, setTodasTransacoes] = useState<Transacao[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [mes, setMes] = useState(new Date().getMonth() + 1);
@@ -18,25 +19,16 @@ export function DashboardScreen() {
     try {
       setLoading(true);
       setError('');
-      // Use June 2026 as default if before that date
-      let queryMes = mes;
-      let queryAno = ano;
-
-      const now = new Date(ano, mes - 1);
-      const june2026 = new Date(2026, 5); // June 2026
-
-      if (now < june2026) {
-        queryMes = 6;
-        queryAno = 2026;
-      }
-
-      const dashboard = await apiService.getDashboard(queryMes, queryAno);
+      const [dashboard, todas] = await Promise.all([
+        apiService.getDashboard(mes, ano),
+        apiService.getTransacoes(),
+      ]);
       setData(dashboard);
+      setTodasTransacoes(todas);
     } catch (err) {
       setError('Erro ao carregar dashboard');
       console.error(err);
-      // Mock data for demo
-      setData(mockDashboardData());
+      setData(emptyDashboard(mes, ano));
     } finally {
       setLoading(false);
     }
@@ -90,7 +82,7 @@ export function DashboardScreen() {
     color: COLORS[idx % COLORS.length],
   }));
 
-  const trendData = generateTrendData(mes, ano);
+  const trendData = generateTrendData(mes, ano, todasTransacoes);
 
   const monthName = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(
     new Date(ano, mes - 1)
@@ -120,14 +112,14 @@ export function DashboardScreen() {
         <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg shadow p-6 border-l-4 border-green-500">
           <p className="text-gray-600 text-sm font-medium">Receitas</p>
           <p className="text-3xl font-bold text-green-600 mt-2">
-            R$ {data.totalReceitas.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            R$ {data.totalReceitas.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </p>
         </div>
 
         <div className="bg-gradient-to-br from-red-50 to-red-100 rounded-lg shadow p-6 border-l-4 border-red-500">
           <p className="text-gray-600 text-sm font-medium">Despesas</p>
           <p className="text-3xl font-bold text-red-600 mt-2">
-            R$ {data.totalDespesas.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            R$ {data.totalDespesas.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </p>
         </div>
 
@@ -138,7 +130,7 @@ export function DashboardScreen() {
         }`}>
           <p className="text-gray-600 text-sm font-medium">Saldo</p>
           <p className={`text-3xl font-bold mt-2 ${data.saldo >= 0 ? 'text-blue-600' : 'text-orange-600'}`}>
-            R$ {data.saldo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            R$ {data.saldo.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </p>
         </div>
       </div>
@@ -152,7 +144,7 @@ export function DashboardScreen() {
               <div key={alerta.categoriaId} className="text-sm text-yellow-800">
                 <p className="font-medium">{alerta.categoriaNome}</p>
                 <p>
-                  {alerta.percentual.toFixed(1)}% do limite (R$ {alerta.gasto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})
+                  {alerta.percentual.toFixed(1)}% do limite (R$ {alerta.gasto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
                 </p>
               </div>
             ))}
@@ -183,7 +175,7 @@ export function DashboardScreen() {
                   ))}
                 </Pie>
                 <Tooltip
-                  formatter={(value) => `R$ ${parseFloat(value.toString()).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+                  formatter={(value) => `R$ ${parseFloat(value.toString()).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                 />
               </PieChart>
             </ResponsiveContainer>
@@ -201,7 +193,7 @@ export function DashboardScreen() {
               <XAxis dataKey="mes" />
               <YAxis />
               <Tooltip
-                formatter={(value) => `R$ ${parseFloat(value.toString()).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+                formatter={(value) => `R$ ${parseFloat(value.toString()).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               />
               <Legend />
               <Line type="monotone" dataKey="receitas" stroke="#10b981" strokeWidth={2} name="Receitas" />
@@ -230,10 +222,10 @@ export function DashboardScreen() {
                 <tr key={item.categoria.id} className="border-b hover:bg-gray-50">
                   <td className="px-4 py-2">{item.categoria.nome}</td>
                   <td className="px-4 py-2 text-right">
-                    R$ {item.gasto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    R$ {item.gasto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                   <td className="px-4 py-2 text-right">
-                    R$ {item.categoria.limiteMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    R$ {item.categoria.limiteMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                   <td className="px-4 py-2 text-right">
                     <span
@@ -269,7 +261,7 @@ export function DashboardScreen() {
                   </p>
                 </div>
                 <p className={`font-semibold ${tx.tipo === 'receita' ? 'text-green-600' : 'text-red-600'}`}>
-                  {tx.tipo === 'receita' ? '+' : '-'} R$ {tx.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  {tx.tipo === 'receita' ? '+' : '-'} R$ {tx.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </p>
               </div>
             ))}
@@ -280,100 +272,40 @@ export function DashboardScreen() {
   );
 }
 
-// Mock data for development
-function mockDashboardData(): DashboardData {
+// Dashboard vazio (usado só se houver erro de carregamento).
+function emptyDashboard(mes: number, ano: number): DashboardData {
   return {
-    mes: 6,
-    ano: 2026,
-    totalReceitas: 5000,
-    totalDespesas: 3200,
-    saldo: 1800,
-    porCategoria: [
-      {
-        categoria: { id: '1', nome: 'Combustível', limiteMensal: 600, corGrafico: '#3b82f6', criadoEm: '' },
-        gasto: 450,
-        percentualDoLimite: 75,
-      },
-      {
-        categoria: { id: '2', nome: 'Comida', limiteMensal: 800, corGrafico: '#ef4444', criadoEm: '' },
-        gasto: 650,
-        percentualDoLimite: 81.25,
-      },
-      {
-        categoria: { id: '3', nome: 'Energia', limiteMensal: 300, corGrafico: '#10b981', criadoEm: '' },
-        gasto: 250,
-        percentualDoLimite: 83.33,
-      },
-      {
-        categoria: { id: '4', nome: 'Internet', limiteMensal: 150, corGrafico: '#f59e0b', criadoEm: '' },
-        gasto: 150,
-        percentualDoLimite: 100,
-      },
-      {
-        categoria: { id: '5', nome: 'Academia', limiteMensal: 200, corGrafico: '#8b5cf6', criadoEm: '' },
-        gasto: 200,
-        percentualDoLimite: 100,
-      },
-    ],
-    alertas: [
-      { categoriaId: '2', categoriaNome: 'Comida', percentual: 81.25, limite: 800, gasto: 650 },
-      { categoriaId: '3', categoriaNome: 'Energia', percentual: 83.33, limite: 300, gasto: 250 },
-    ],
-    ultimasTransacoes: [
-      {
-        id: '1',
-        categoriaId: '1',
-        categoriaNome: 'Combustível',
-        descricao: 'Gasolina no posto',
-        valor: 150,
-        dataTransacao: '2026-06-20',
-        tipo: 'despesa',
-        metodoPagamento: 'cartao',
-        criadoEm: '',
-        atualizadoEm: '',
-      },
-      {
-        id: '2',
-        categoriaId: '2',
-        categoriaNome: 'Comida',
-        descricao: 'Supermercado',
-        valor: 200,
-        dataTransacao: '2026-06-19',
-        tipo: 'despesa',
-        metodoPagamento: 'cartao',
-        criadoEm: '',
-        atualizadoEm: '',
-      },
-      {
-        id: '3',
-        categoriaId: '3',
-        categoriaNome: 'Energia',
-        descricao: 'Conta de luz',
-        valor: 250,
-        dataTransacao: '2026-06-15',
-        tipo: 'despesa',
-        metodoPagamento: 'transferencia',
-        criadoEm: '',
-        atualizadoEm: '',
-      },
-    ],
+    mes,
+    ano,
+    totalReceitas: 0,
+    totalDespesas: 0,
+    saldo: 0,
+    porCategoria: [],
+    alertas: [],
+    ultimasTransacoes: [],
   };
 }
 
-function generateTrendData(mes: number, ano: number) {
+// Tendência dos últimos 6 meses calculada a partir das transações reais,
+// agrupando pela competência (mês da aba) para bater com a planilha.
+function generateTrendData(mes: number, ano: number, transacoes: Transacao[]) {
   const data = [];
   for (let i = 5; i >= 0; i--) {
     let m = mes - i;
     let y = ano;
-    if (m <= 0) {
+    while (m <= 0) {
       m += 12;
       y -= 1;
     }
+    const chave = `${y}-${String(m).padStart(2, '0')}`;
+    const doMes = transacoes.filter((t) => competenciaDe(t) === chave);
+    const receitas = doMes.filter((t) => t.tipo === 'receita').reduce((s, t) => s + t.valor, 0);
+    const despesas = doMes.filter((t) => t.tipo === 'despesa').reduce((s, t) => s + t.valor, 0);
     data.push({
       mes: new Intl.DateTimeFormat('pt-BR', { month: 'short' }).format(new Date(y, m - 1)),
-      receitas: Math.random() * 5000 + 2000,
-      despesas: Math.random() * 3000 + 1500,
-      saldo: Math.random() * 2000 + 1000,
+      receitas,
+      despesas,
+      saldo: receitas - despesas,
     });
   }
   return data;

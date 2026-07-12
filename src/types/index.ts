@@ -17,6 +17,7 @@ export interface Transacao {
   descricao: string;
   valor: number;
   dataTransacao: string; // ISO date (YYYY-MM-DD)
+  competencia?: string; // mês de referência YYYY-MM (aba da planilha)
   tipo: TipoTransacao;
   metodoPagamento: MetodoPagamento;
   notas?: string;

@@ -156,7 +156,7 @@ export function OrcamentoScreen() {
                     <div className="flex justify-between text-sm mb-1">
                       <span className="text-gray-600">Limite mensal</span>
                       <span className="font-medium">
-                        R$ {cat.limiteMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        R$ {cat.limiteMensal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
                     </div>
                   </div>
