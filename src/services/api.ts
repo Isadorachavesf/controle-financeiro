@@ -91,7 +91,9 @@ function salvarCacheLocal(): void {
 }
 
 // --- Comunicação com o Apps Script ---
-const TIMEOUT_MS = 20000;
+// A planilha é grande e a primeira leitura pode ser lenta (cold start do
+// Apps Script + muitas abas). Damos bastante tempo antes de desistir.
+const TIMEOUT_MS = 70000;
 
 async function chamarRemoto(action: string, payload?: any): Promise<any> {
   const url = getAppsScriptUrl();

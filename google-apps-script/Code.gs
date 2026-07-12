@@ -56,7 +56,9 @@ function handle(e, metodo) {
     var resultado;
     switch (acao) {
       case 'bootstrap':
-        resultado = { categorias: lerCategorias(), transacoes: lerTransacoes() };
+        // Lê as transações UMA vez e reaproveita para montar as categorias.
+        var _txs = lerTransacoes();
+        resultado = { categorias: lerCategorias(_txs), transacoes: _txs };
         break;
       case 'getTransacoes': resultado = lerTransacoes(); break;
       case 'getCategorias': resultado = lerCategorias(); break;
@@ -195,7 +197,7 @@ function lerTransacoes() {
 // Categorias = nomes distintos dos dados + limites salvos em _Orcamentos
 // ---------------------------------------------------------------------------
 
-function lerCategorias() {
+function lerCategorias(txsOpt) {
   // limites salvos
   var limites = {};
   var orc = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ABA_ORCAMENTOS);
@@ -206,10 +208,10 @@ function lerCategorias() {
     });
   }
 
-  // nomes distintos vindos das transações
+  // nomes distintos vindos das transações (reaproveita a leitura quando possível)
   var vistos = {};
   var nomes = [];
-  lerTransacoes().forEach(function (t) {
+  (txsOpt || lerTransacoes()).forEach(function (t) {
     if (!vistos[t.categoriaId]) { vistos[t.categoriaId] = true; nomes.push(t.categoriaId); }
   });
   // inclui categorias que só existem em _Orcamentos
