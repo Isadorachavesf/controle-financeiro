@@ -119,6 +119,9 @@ function abasDeDados() {
   return ss.getSheets().filter(function (sheet) {
     var nome = sheet.getName();
     if (nome.charAt(0) === '_' || sheet.getLastColumn() < 3 || sheet.getLastRow() < 1) return false;
+    // Apenas abas de MÊS (ex.: "Junho 2026"). Ignora "Base de dados",
+    // "A receber 2026", "CNPJs clientes" e afins, que duplicam/consolidam dados.
+    if (!competenciaDaAba(nome)) return false;
     var cab = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     return ehAbaDeDados(mapearColunas(cab));
   });

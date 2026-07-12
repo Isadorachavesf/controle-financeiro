@@ -158,7 +158,7 @@ function buscarDaRede(): Promise<void> {
     cargaEmAndamento = (async () => {
       const remoto = await chamarRemoto('bootstrap');
       cache.categorias = remoto.categorias || [];
-      cache.transacoes = remoto.transacoes || [];
+      cache.transacoes = (remoto.transacoes || []).filter(ehDeAbaMensal);
       cache.loadedAt = Date.now();
       salvarCacheLocal();
     })().finally(() => { cargaEmAndamento = null; });
@@ -220,6 +220,15 @@ export function competenciaDe(tx: Transacao): string {
     if (c) return c;
   }
   return tx.dataTransacao ? tx.dataTransacao.slice(0, 7) : '';
+}
+
+// Mantém apenas lançamentos das ABAS DE MÊS. Ignora linhas vindas de abas
+// auxiliares da planilha ("Base de dados", "A receber 2026", "CNPJs clientes"…),
+// que consolidam/duplicam dados e inflavam os totais. Lançamentos locais
+// (id sem "||") são sempre mantidos.
+function ehDeAbaMensal(tx: Transacao): boolean {
+  if (!tx.id || tx.id.indexOf('||') < 0) return true;
+  return competenciaDeNomeAba(tx.id.split('||')[0]) !== '';
 }
 function pertenceAo(tx: Transacao, mes: number, ano: number): boolean {
   return competenciaDe(tx) === `${ano}-${String(mes).padStart(2, '0')}`;
