@@ -91,69 +91,98 @@ function salvarCacheLocal(): void {
 }
 
 // --- Comunicação com o Apps Script ---
+const TIMEOUT_MS = 20000;
+
 async function chamarRemoto(action: string, payload?: any): Promise<any> {
   const url = getAppsScriptUrl();
   if (!url) throw new Error('Planilha não conectada');
 
-  const isLeitura = action === 'bootstrap' || action.startsWith('get');
-  let resp: Response;
-  if (isLeitura) {
-    resp = await fetch(`${url}?action=${encodeURIComponent(action)}&t=${Date.now()}`, {
-      method: 'GET',
-      redirect: 'follow',
-    });
-  } else {
-    // text/plain evita a verificação CORS (preflight), que o Apps Script não trata.
-    resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action, payload }),
-      redirect: 'follow',
-    });
+  const controle = new AbortController();
+  const timer = setTimeout(() => controle.abort(), TIMEOUT_MS);
+  try {
+    const isLeitura = action === 'bootstrap' || action.startsWith('get');
+    let resp: Response;
+    if (isLeitura) {
+      resp = await fetch(`${url}?action=${encodeURIComponent(action)}&t=${Date.now()}`, {
+        method: 'GET',
+        redirect: 'follow',
+        signal: controle.signal,
+      });
+    } else {
+      // text/plain evita a verificação CORS (preflight), que o Apps Script não trata.
+      resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action, payload }),
+        redirect: 'follow',
+        signal: controle.signal,
+      });
+    }
+    if (!resp.ok) throw new Error(`Erro de rede (${resp.status})`);
+    const data = await resp.json();
+    if (!data.success) throw new Error(data.error || 'Erro no servidor da planilha');
+    return data.data;
+  } finally {
+    clearTimeout(timer);
   }
-
-  if (!resp.ok) throw new Error(`Erro de rede (${resp.status})`);
-  const data = await resp.json();
-  if (!data.success) throw new Error(data.error || 'Erro no servidor da planilha');
-  return data.data;
 }
 
-// Garante que o cache está carregado. Em modo conectado, busca da planilha
-// quando o cache está velho; em falha de rede, usa o cache local.
-async function garantirCarregado(forcar = false): Promise<void> {
-  const agora = Date.now();
-  if (!forcar && cache.loadedAt && agora - cache.loadedAt < CACHE_TTL_MS) return;
+// --- Assinantes para atualizações em segundo plano ---
+const ouvintes: Array<() => void> = [];
+export function onDadosAtualizados(cb: () => void): () => void {
+  ouvintes.push(cb);
+  return () => {
+    const i = ouvintes.indexOf(cb);
+    if (i >= 0) ouvintes.splice(i, 1);
+  };
+}
+function notificar(): void {
+  ouvintes.forEach((cb) => {
+    try { cb(); } catch { /* ignora */ }
+  });
+}
 
-  if (isConectado()) {
-    try {
+// Carrega o cache local (rápido, síncrono) na primeira vez.
+function garantirCacheLocalSync(): void {
+  if (cache.loadedAt === 0 && cache.transacoes.length === 0 && cache.categorias.length === 0) {
+    const local = lerCacheLocal();
+    cache.categorias = local.categorias;
+    cache.transacoes = local.transacoes;
+  }
+}
+
+// Uma única busca da planilha compartilhada entre chamadas simultâneas.
+let cargaEmAndamento: Promise<void> | null = null;
+function buscarDaRede(): Promise<void> {
+  if (!cargaEmAndamento) {
+    cargaEmAndamento = (async () => {
       const remoto = await chamarRemoto('bootstrap');
       cache.categorias = remoto.categorias || [];
       cache.transacoes = remoto.transacoes || [];
-      cache.loadedAt = agora;
+      cache.loadedAt = Date.now();
       salvarCacheLocal();
-      return;
-    } catch (e) {
-      // Sem internet ou erro: usa o cache local como plano B.
-      const local = lerCacheLocal();
-      cache.categorias = local.categorias;
-      cache.transacoes = local.transacoes;
-      cache.loadedAt = agora;
-      throw e;
-    }
+    })().finally(() => { cargaEmAndamento = null; });
   }
-
-  const local = lerCacheLocal();
-  cache.categorias = local.categorias;
-  cache.transacoes = local.transacoes;
-  cache.loadedAt = agora;
+  return cargaEmAndamento;
+}
+function atualizarEmBackground(): void {
+  if (!isConectado()) return;
+  buscarDaRede().then(notificar).catch(() => { /* mantém cache */ });
 }
 
-// Carrega ignorando erros de rede (para leituras não quebrarem a tela).
+// Estratégia "mostra o cache na hora, atualiza em segundo plano".
+// Só espera a rede na primeira carga (quando não há nada em cache) ou se forçado.
 async function carregarSeguro(forcar = false): Promise<void> {
-  try {
-    await garantirCarregado(forcar);
-  } catch {
-    /* já preencheu com cache local */
+  garantirCacheLocalSync();
+  if (!isConectado()) return;
+
+  const temCache = cache.loadedAt > 0 || cache.transacoes.length > 0 || cache.categorias.length > 0;
+  const fresco = cache.loadedAt > 0 && Date.now() - cache.loadedAt < CACHE_TTL_MS;
+
+  if (forcar || !temCache) {
+    try { await buscarDaRede(); } catch { /* usa cache local */ }
+  } else if (!fresco) {
+    atualizarEmBackground();
   }
 }
 
@@ -200,10 +229,11 @@ class ApiService {
   // Exponibiliza estado da conexão para as telas
   isConectado = isConectado;
   getAppsScriptUrl = getAppsScriptUrl;
+  onDadosAtualizados = onDadosAtualizados;
 
   async conectarPlanilha(url: string): Promise<void> {
     setAppsScriptUrl(url);
-    await garantirCarregado(true); // valida a URL buscando dados
+    await buscarDaRede(); // valida a URL buscando dados
   }
 
   desconectarPlanilha(): void {
@@ -346,7 +376,7 @@ class ApiService {
   // --- Sincronização ---
   async triggerSync(): Promise<SincronizacaoStatus> {
     try {
-      await garantirCarregado(true); // força buscar da planilha
+      await buscarDaRede(); // força buscar da planilha
       return {
         status: 'sucesso',
         ultimaSincronizacao: new Date().toISOString(),

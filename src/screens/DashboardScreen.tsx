@@ -3,21 +3,37 @@ import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tool
 import { DashboardData, Transacao } from '@/types/index';
 import { apiService, competenciaDe } from '@services/api';
 
+// O controle financeiro começa em junho de 2026.
+const MIN_MES = 6;
+const MIN_ANO = 2026;
+const antesDoMinimo = (m: number, a: number) => a < MIN_ANO || (a === MIN_ANO && m < MIN_MES);
+
 export function DashboardScreen() {
+  const inicial = (() => {
+    const hoje = new Date();
+    let m = hoje.getMonth() + 1;
+    let a = hoje.getFullYear();
+    if (antesDoMinimo(m, a)) { m = MIN_MES; a = MIN_ANO; }
+    return { m, a };
+  })();
+
   const [data, setData] = useState<DashboardData | null>(null);
   const [todasTransacoes, setTodasTransacoes] = useState<Transacao[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [mes, setMes] = useState(new Date().getMonth() + 1);
-  const [ano, setAno] = useState(new Date().getFullYear());
+  const [mes, setMes] = useState(inicial.m);
+  const [ano, setAno] = useState(inicial.a);
 
   useEffect(() => {
     loadDashboard();
+    // Atualiza a tela quando a planilha terminar de carregar em segundo plano.
+    const cancelar = apiService.onDadosAtualizados(() => loadDashboard());
+    return cancelar;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mes, ano]);
 
   const loadDashboard = async () => {
     try {
-      setLoading(true);
       setError('');
       const [dashboard, todas] = await Promise.all([
         apiService.getDashboard(mes, ano),
@@ -34,7 +50,10 @@ export function DashboardScreen() {
     }
   };
 
+  const noMinimo = mes === MIN_MES && ano === MIN_ANO;
+
   const handlePrevMonth = () => {
+    if (noMinimo) return; // não vai antes de junho/2026
     if (mes === 1) {
       setMes(12);
       setAno(ano - 1);
@@ -57,7 +76,8 @@ export function DashboardScreen() {
       <div className="flex items-center justify-center py-12">
         <div className="text-center">
           <div className="text-4xl mb-4">⏳</div>
-          <p className="text-gray-600">Carregando dashboard...</p>
+          <p className="text-gray-600">Carregando seus dados da planilha...</p>
+          <p className="text-gray-400 text-sm mt-1">Na primeira vez pode levar alguns segundos.</p>
         </div>
       </div>
     );
@@ -94,7 +114,9 @@ export function DashboardScreen() {
       <div className="flex items-center justify-between bg-white rounded-lg shadow p-4">
         <button
           onClick={handlePrevMonth}
-          className="p-2 hover:bg-gray-100 rounded-lg transition"
+          disabled={noMinimo}
+          title={noMinimo ? 'O controle começa em junho de 2026' : ''}
+          className="p-2 hover:bg-gray-100 rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed"
         >
           ←
         </button>
