@@ -168,11 +168,11 @@ function lerTransacoes() {
       if (!categoria) categoria = 'Sem categoria';
 
       var codigo = map.codigo !== undefined ? String(linha[map.codigo] || '').trim() : '';
+      var parcela = map.parcela !== undefined ? String(linha[map.parcela] || '').trim() : '';
+      var quem = map.quem !== undefined ? String(linha[map.quem] || '').trim() : '';
       var notasPartes = [];
-      if (map.parcela !== undefined && String(linha[map.parcela] || '').trim())
-        notasPartes.push('Parcela ' + String(linha[map.parcela]).trim());
-      if (map.quem !== undefined && String(linha[map.quem] || '').trim())
-        notasPartes.push(String(linha[map.quem]).trim());
+      if (parcela) notasPartes.push('Parcela ' + parcela);
+      if (quem) notasPartes.push(quem);
 
       out.push({
         id: nome + '||' + codigo,
@@ -184,6 +184,8 @@ function lerTransacoes() {
         competencia: competencia,
         tipo: tipo,
         metodoPagamento: map.forma !== undefined ? String(linha[map.forma] || '').trim() : '',
+        parcela: parcela,
+        quem: quem,
         notas: notasPartes.join(' · '),
         criadoEm: '',
         atualizadoEm: ''
@@ -208,11 +210,21 @@ function lerCategorias(txsOpt) {
     });
   }
 
-  // nomes distintos vindos das transações (reaproveita a leitura quando possível)
   var vistos = {};
   var nomes = [];
+
+  // Lista oficial da aba "Categorias" (coluna única), se existir.
+  var catSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Categorias');
+  if (catSheet && catSheet.getLastRow() >= 1) {
+    catSheet.getRange(1, 1, catSheet.getLastRow(), 1).getValues().forEach(function (l) {
+      var nome = String(l[0] || '').trim();
+      if (nome && !vistos[nome]) { vistos[nome] = true; nomes.push(nome); }
+    });
+  }
+
+  // nomes que aparecem nas transações (reaproveita a leitura quando possível)
   (txsOpt || lerTransacoes()).forEach(function (t) {
-    if (!vistos[t.categoriaId]) { vistos[t.categoriaId] = true; nomes.push(t.categoriaId); }
+    if (t.categoriaId && !vistos[t.categoriaId]) { vistos[t.categoriaId] = true; nomes.push(t.categoriaId); }
   });
   // inclui categorias que só existem em _Orcamentos
   Object.keys(limites).forEach(function (nome) {
@@ -306,6 +318,7 @@ function criarTransacao(p) {
   if (map.compra !== undefined) linha[map.compra] = p.descricao || '';
   if (map.categoria !== undefined) linha[map.categoria] = p.categoriaId || '';
   if (map.forma !== undefined) linha[map.forma] = p.metodoPagamento || '';
+  if (map.parcela !== undefined) linha[map.parcela] = p.parcela || 'À vista';
   if (map.valor !== undefined) linha[map.valor] = valorAssinado;
   if (map.quem !== undefined) linha[map.quem] = p.quem || 'Isadora';
   if (map.datalanc !== undefined) linha[map.datalanc] = formatarDataBR(new Date());
@@ -342,6 +355,8 @@ function atualizarTransacao(id, p) {
   if (p.descricao !== undefined && map.compra !== undefined) linha[map.compra] = p.descricao;
   if (p.categoriaId !== undefined && map.categoria !== undefined) linha[map.categoria] = p.categoriaId;
   if (p.metodoPagamento !== undefined && map.forma !== undefined) linha[map.forma] = p.metodoPagamento;
+  if (p.parcela !== undefined && map.parcela !== undefined) linha[map.parcela] = p.parcela;
+  if (p.quem !== undefined && map.quem !== undefined) linha[map.quem] = p.quem;
   if (p.dataTransacao !== undefined && map.data !== undefined) linha[map.data] = formatarDataBR(p.dataTransacao);
   if (p.valor !== undefined && map.valor !== undefined) {
     var tipo = p.tipo || (parseValor(linha[map.valor]) < 0 ? 'receita' : 'despesa');
@@ -369,7 +384,9 @@ function montarRetorno(nomeAba, codigo, p) {
     competencia: competenciaDaAba(nomeAba) || (p.dataTransacao ? String(p.dataTransacao).substring(0, 7) : ''),
     tipo: p.tipo || 'despesa',
     metodoPagamento: p.metodoPagamento || '',
-    notas: p.notas || '',
+    parcela: p.parcela || 'À vista',
+    quem: p.quem || 'Isadora',
+    notas: [p.parcela ? 'Parcela ' + p.parcela : '', p.quem || ''].filter(Boolean).join(' · '),
     criadoEm: new Date().toISOString(),
     atualizadoEm: new Date().toISOString()
   };

@@ -44,9 +44,13 @@ export function TransacaoTable({ transacoes, categorias, onEdit, onDelete }: Tra
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-700">
                   {tx.descricao}
-                  {tx.notas && (
-                    <div className="text-xs text-gray-500 mt-1">{tx.notas}</div>
-                  )}
+                  {(() => {
+                    const partes = [] as string[];
+                    if (tx.parcela && tx.parcela !== 'À vista') partes.push('Parcela ' + tx.parcela);
+                    if (tx.quem) partes.push(tx.quem);
+                    const sub = partes.join(' · ') || tx.notas;
+                    return sub ? <div className="text-xs text-gray-500 mt-1">{sub}</div> : null;
+                  })()}
                 </td>
                 <td className="px-4 py-3 text-sm text-right font-medium">
                   <span className={tx.tipo === 'receita' ? 'text-green-600' : 'text-red-600'}>
@@ -65,15 +69,7 @@ export function TransacaoTable({ transacoes, categorias, onEdit, onDelete }: Tra
                   </span>
                 </td>
                 <td className="px-4 py-3 text-sm text-center text-gray-600">
-                  <span className="text-xs">
-                    {tx.metodoPagamento === 'cartao'
-                      ? '💳'
-                      : tx.metodoPagamento === 'dinheiro'
-                      ? '💵'
-                      : tx.metodoPagamento === 'transferencia'
-                      ? '📱'
-                      : '...'}
-                  </span>
+                  <span className="text-xs whitespace-nowrap">{tx.metodoPagamento || '—'}</span>
                 </td>
                 <td className="px-4 py-3 text-sm text-center">
                   <div className="flex gap-2 justify-center">

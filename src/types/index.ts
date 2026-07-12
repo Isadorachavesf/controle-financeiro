@@ -19,12 +19,18 @@ export interface Transacao {
   dataTransacao: string; // ISO date (YYYY-MM-DD)
   competencia?: string; // mês de referência YYYY-MM (aba da planilha)
   tipo: TipoTransacao;
-  metodoPagamento: MetodoPagamento;
+  metodoPagamento: string; // "Crédito PF" | "Débito / PIX / Boleto" | ...
+  parcela?: string; // "À vista" ou "1/3"
+  quem?: string; // Compra feita por: Isadora | Maria | Outros
   notas?: string;
   googleSheetsId?: string;
   criadoEm: string;
   atualizadoEm: string;
 }
+
+// Opções que espelham a aba "Lançamento" da planilha.
+export const FORMAS_PAGAMENTO = ['Crédito PF', 'Débito / PIX / Boleto'];
+export const QUEM_OPCOES = ['Isadora', 'Maria', 'Outros'];
 
 export interface DashboardData {
   mes: number;
