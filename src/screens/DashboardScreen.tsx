@@ -96,7 +96,67 @@ export function DashboardScreen() {
     '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#06b6d4',
   ];
 
-  const chartData = data.porCategoria.map((item, idx) => ({
+  const fmt = (v: number) =>
+    `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  const chaveMes = `${ano}-${String(mes).padStart(2, '0')}`;
+  const txMes = todasTransacoes.filter((t) => competenciaDe(t) === chaveMes);
+  const despesasMes = txMes.filter((t) => t.tipo === 'despesa');
+
+  // Mês anterior (para comparação), respeitando o piso de junho/2026.
+  let pm = mes - 1;
+  let pa = ano;
+  if (pm < 1) { pm = 12; pa -= 1; }
+  const temMesAnterior = !antesDoMinimo(pm, pa);
+  const chavePrev = `${pa}-${String(pm).padStart(2, '0')}`;
+  const despPrev = todasTransacoes
+    .filter((t) => competenciaDe(t) === chavePrev && t.tipo === 'despesa')
+    .reduce((s, t) => s + t.valor, 0);
+  const deltaPct =
+    temMesAnterior && despPrev > 0 ? ((data.totalDespesas - despPrev) / despPrev) * 100 : null;
+
+  const totalDesp = data.totalDespesas || 1;
+  const ranking = data.porCategoria.filter((c) => c.gasto > 0).sort((a, b) => b.gasto - a.gasto);
+  const maxGastoCat = ranking[0]?.gasto || 1;
+  const maiorGasto = despesasMes.reduce<Transacao | null>(
+    (max, t) => (t.valor > (max?.valor ?? 0) ? t : max),
+    null
+  );
+  const diasNoMes = new Date(ano, mes, 0).getDate();
+  const mediaDiaria = data.totalDespesas / diasNoMes;
+
+  const estourou = data.porCategoria.filter(
+    (c) => c.categoria.limiteMensal > 0 && c.percentualDoLimite >= 100
+  );
+  const atencao = data.porCategoria.filter(
+    (c) => c.categoria.limiteMensal > 0 && c.percentualDoLimite >= 80 && c.percentualDoLimite < 100
+  );
+  const temOrcamento = data.porCategoria.some((c) => c.categoria.limiteMensal > 0);
+
+  const insights: string[] = [];
+  if (ranking[0]) {
+    insights.push(
+      `Sua maior categoria foi ${ranking[0].categoria.nome}: ${fmt(ranking[0].gasto)} (${((ranking[0].gasto / totalDesp) * 100).toFixed(0)}% dos gastos).`
+    );
+  }
+  if (deltaPct !== null) {
+    const abs = Math.abs(deltaPct).toFixed(0);
+    insights.push(
+      deltaPct >= 0
+        ? `⬆️ Seus gastos subiram ${abs}% em relação ao mês anterior.`
+        : `⬇️ Seus gastos caíram ${abs}% em relação ao mês anterior. Muito bem! 👏`
+    );
+  }
+  if (estourou.length > 0) {
+    insights.push(
+      `🚨 ${estourou.length} categoria${estourou.length > 1 ? 's' : ''} passaram do limite do orçamento.`
+    );
+  }
+  if (maiorGasto) {
+    insights.push(`Maior lançamento do mês: ${maiorGasto.descricao || maiorGasto.categoriaNome} — ${fmt(maiorGasto.valor)}.`);
+  }
+
+  const chartData = ranking.map((item, idx) => ({
     name: item.categoria.nome,
     value: item.gasto,
     color: COLORS[idx % COLORS.length],
@@ -133,16 +193,17 @@ export function DashboardScreen() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg shadow p-6 border-l-4 border-green-500">
           <p className="text-gray-600 text-sm font-medium">Receitas</p>
-          <p className="text-3xl font-bold text-green-600 mt-2">
-            R$ {data.totalReceitas.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </p>
+          <p className="text-3xl font-bold text-green-600 mt-2">{fmt(data.totalReceitas)}</p>
         </div>
 
         <div className="bg-gradient-to-br from-red-50 to-red-100 rounded-lg shadow p-6 border-l-4 border-red-500">
           <p className="text-gray-600 text-sm font-medium">Despesas</p>
-          <p className="text-3xl font-bold text-red-600 mt-2">
-            R$ {data.totalDespesas.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </p>
+          <p className="text-3xl font-bold text-red-600 mt-2">{fmt(data.totalDespesas)}</p>
+          {deltaPct !== null && (
+            <p className={`text-xs mt-1 font-medium ${deltaPct >= 0 ? 'text-red-500' : 'text-green-600'}`}>
+              {deltaPct >= 0 ? '▲' : '▼'} {Math.abs(deltaPct).toFixed(0)}% vs. mês anterior
+            </p>
+          )}
         </div>
 
         <div className={`bg-gradient-to-br rounded-lg shadow p-6 border-l-4 ${
@@ -152,24 +213,113 @@ export function DashboardScreen() {
         }`}>
           <p className="text-gray-600 text-sm font-medium">Saldo</p>
           <p className={`text-3xl font-bold mt-2 ${data.saldo >= 0 ? 'text-blue-600' : 'text-orange-600'}`}>
-            R$ {data.saldo.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {fmt(data.saldo)}
           </p>
         </div>
       </div>
 
-      {/* Budget Alerts */}
-      {data.alertas.length > 0 && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <h3 className="font-semibold text-yellow-900 mb-3">⚠️ Alertas de Orçamento</h3>
-          <div className="space-y-2">
-            {data.alertas.map((alerta) => (
-              <div key={alerta.categoriaId} className="text-sm text-yellow-800">
-                <p className="font-medium">{alerta.categoriaNome}</p>
-                <p>
-                  {alerta.percentual.toFixed(1)}% do limite (R$ {alerta.gasto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
-                </p>
-              </div>
+      {/* Mini indicadores */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <div className="bg-white rounded-lg shadow p-4">
+          <p className="text-gray-500 text-xs font-medium">Lançamentos no mês</p>
+          <p className="text-2xl font-bold text-gray-800 mt-1">{txMes.length}</p>
+        </div>
+        <div className="bg-white rounded-lg shadow p-4">
+          <p className="text-gray-500 text-xs font-medium">Média por dia</p>
+          <p className="text-2xl font-bold text-gray-800 mt-1">{fmt(mediaDiaria)}</p>
+        </div>
+        <div className="bg-white rounded-lg shadow p-4 col-span-2 md:col-span-1">
+          <p className="text-gray-500 text-xs font-medium">Maior lançamento</p>
+          <p className="text-lg font-bold text-gray-800 mt-1 truncate">
+            {maiorGasto ? fmt(maiorGasto.valor) : '—'}
+          </p>
+          {maiorGasto && (
+            <p className="text-xs text-gray-500 truncate">{maiorGasto.descricao || maiorGasto.categoriaNome}</p>
+          )}
+        </div>
+      </div>
+
+      {/* Insights automáticos */}
+      {insights.length > 0 && (
+        <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-5">
+          <h3 className="font-semibold text-indigo-900 mb-3">💡 Resumo do mês</h3>
+          <ul className="space-y-1.5 text-sm text-indigo-900">
+            {insights.map((txt, i) => (
+              <li key={i}>• {txt}</li>
             ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Orçamento: estouros e atenção */}
+      {(estourou.length > 0 || atencao.length > 0) && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {estourou.length > 0 && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <h3 className="font-semibold text-red-900 mb-3">🚨 Estourou o orçamento</h3>
+              <div className="space-y-2">
+                {estourou.map((c) => (
+                  <div key={c.categoria.id} className="text-sm">
+                    <div className="flex justify-between font-medium text-red-900">
+                      <span>{c.categoria.nome}</span>
+                      <span>{c.percentualDoLimite.toFixed(0)}%</span>
+                    </div>
+                    <p className="text-red-700 text-xs">
+                      {fmt(c.gasto)} de {fmt(c.categoria.limiteMensal)} — passou {fmt(c.gasto - c.categoria.limiteMensal)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {atencao.length > 0 && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+              <h3 className="font-semibold text-yellow-900 mb-3">⚠️ Perto do limite (80%+)</h3>
+              <div className="space-y-2">
+                {atencao.map((c) => (
+                  <div key={c.categoria.id} className="text-sm">
+                    <div className="flex justify-between font-medium text-yellow-900">
+                      <span>{c.categoria.nome}</span>
+                      <span>{c.percentualDoLimite.toFixed(0)}%</span>
+                    </div>
+                    <p className="text-yellow-700 text-xs">
+                      {fmt(c.gasto)} de {fmt(c.categoria.limiteMensal)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Para onde foi o dinheiro (ranking) */}
+      {ranking.length > 0 && (
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="font-semibold mb-4">Para onde foi seu dinheiro</h3>
+          <div className="space-y-3">
+            {ranking.slice(0, 8).map((item, idx) => {
+              const pct = (item.gasto / totalDesp) * 100;
+              return (
+                <div key={item.categoria.id}>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="font-medium text-gray-700">{item.categoria.nome}</span>
+                    <span className="text-gray-600">
+                      {fmt(item.gasto)} <span className="text-gray-400">({pct.toFixed(0)}%)</span>
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-100 rounded-full h-2.5">
+                    <div
+                      className="h-2.5 rounded-full"
+                      style={{
+                        width: `${(item.gasto / maxGastoCat) * 100}%`,
+                        backgroundColor: COLORS[idx % COLORS.length],
+                      }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -186,10 +336,9 @@ export function DashboardScreen() {
                   data={chartData}
                   cx="50%"
                   cy="50%"
-                  labelLine={false}
-                  label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                  outerRadius={80}
-                  fill="#8884d8"
+                  innerRadius={55}
+                  outerRadius={95}
+                  paddingAngle={1}
                   dataKey="value"
                 >
                   {chartData.map((entry, index) => (
@@ -197,7 +346,10 @@ export function DashboardScreen() {
                   ))}
                 </Pie>
                 <Tooltip
-                  formatter={(value) => `R$ ${parseFloat(value.toString()).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                  formatter={(value, name) => [
+                    `R$ ${parseFloat(value.toString()).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                    name,
+                  ]}
                 />
               </PieChart>
             </ResponsiveContainer>
