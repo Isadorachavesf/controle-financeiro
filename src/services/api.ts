@@ -152,10 +152,35 @@ function comNomeCategoria(tx: Transacao): Transacao {
   return { ...tx, categoriaNome: cat?.nome };
 }
 
-// Mês de referência de uma transação: usa a competência (aba da planilha)
-// quando existe; senão, o mês da data. Assim os totais batem com as abas.
+// Mês de referência (competência) de uma transação. Prioridade:
+//  1) campo competencia enviado pela planilha;
+//  2) nome da aba embutido no id ("Julho 2026||13" → 2026-07);
+//  3) mês da própria data.
+// Assim os totais do app batem com as abas mensais da planilha.
+const MESES_PT_NORM = [
+  'janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho',
+  'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro',
+];
+function normalizarTexto(s: string): string {
+  return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+function competenciaDeNomeAba(nome: string): string {
+  const n = normalizarTexto(nome);
+  for (let i = 0; i < MESES_PT_NORM.length; i++) {
+    if (n.indexOf(MESES_PT_NORM[i]) >= 0) {
+      const ano = (nome.match(/(20\d{2})/) || [])[1];
+      if (ano) return `${ano}-${String(i + 1).padStart(2, '0')}`;
+    }
+  }
+  return '';
+}
 export function competenciaDe(tx: Transacao): string {
-  return tx.competencia || (tx.dataTransacao ? tx.dataTransacao.slice(0, 7) : '');
+  if (tx.competencia) return tx.competencia;
+  if (tx.id && tx.id.indexOf('||') >= 0) {
+    const c = competenciaDeNomeAba(tx.id.split('||')[0]);
+    if (c) return c;
+  }
+  return tx.dataTransacao ? tx.dataTransacao.slice(0, 7) : '';
 }
 function pertenceAo(tx: Transacao, mes: number, ano: number): boolean {
   return competenciaDe(tx) === `${ano}-${String(mes).padStart(2, '0')}`;
