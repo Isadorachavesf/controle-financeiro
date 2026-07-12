@@ -31,18 +31,28 @@ const CATEGORIAS_PADRAO: Categoria[] = [
 
 const CACHE_TTL_MS = 8000;
 
+// URL padrão do App da Web (Google Apps Script) da planilha da Isadora.
+// Deixamos embutida para o app já vir CONECTADO em qualquer aparelho/endereço,
+// sem precisar colar a URL manualmente. Pode ser sobrescrita na tela Sincronizar
+// (o valor colado fica salvo no aparelho e tem prioridade).
+const DEFAULT_APPS_SCRIPT_URL =
+  'https://script.google.com/macros/s/AKfycbxrrvY_hiJif6oC8EvX2lwSbTWML0bqpdDmms318C7141TzXX4szQkV4nKhwsUeAUnzyA/exec';
+
 function gerarId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
 // --- Configuração da conexão com a planilha ---
 export function getAppsScriptUrl(): string {
-  return localStorage.getItem(STORAGE_KEYS.appsScriptUrl) || '';
+  const salva = localStorage.getItem(STORAGE_KEYS.appsScriptUrl);
+  if (salva === '__desconectado__') return '';
+  return salva || DEFAULT_APPS_SCRIPT_URL;
 }
 export function setAppsScriptUrl(url: string): void {
   const limpa = url.trim();
   if (limpa) localStorage.setItem(STORAGE_KEYS.appsScriptUrl, limpa);
-  else localStorage.removeItem(STORAGE_KEYS.appsScriptUrl);
+  // string vazia = desconectar de propósito (mesmo havendo URL embutida)
+  else localStorage.setItem(STORAGE_KEYS.appsScriptUrl, '__desconectado__');
   cache.loadedAt = 0; // invalida cache ao (des)conectar
 }
 export function isConectado(): boolean {
