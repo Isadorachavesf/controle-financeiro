@@ -2,7 +2,7 @@ import React, { ReactNode } from 'react';
 
 interface LayoutProps {
   children: ReactNode;
-  currentScreen: 'dashboard' | 'transacoes' | 'orcamento' | 'sincronizacao';
+  currentScreen: 'dashboard' | 'transacoes' | 'orcamento' | 'investimentos' | 'sincronizacao';
   onNavigate: (screen: string) => void;
   syncStatus?: 'idle' | 'syncing' | 'success' | 'error';
 }
@@ -69,10 +69,11 @@ export function Layout({
       {/* Bottom Navigation */}
       <nav className="bg-white border-t border-gray-200 sticky bottom-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex gap-2 sm:gap-4">
+          <div className="flex gap-1 sm:gap-4">
             <NavLink screen="dashboard" label="Dashboard" icon="📊" />
             <NavLink screen="transacoes" label="Transações" icon="💳" />
             <NavLink screen="orcamento" label="Orçamento" icon="📈" />
+            <NavLink screen="investimentos" label="Investir" icon="💹" />
             <NavLink screen="sincronizacao" label="Sincronizar" icon="🔄" />
           </div>
         </div>

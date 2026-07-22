@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Layout } from '@components/index';
-import { DashboardScreen, TransacoesScreen, OrcamentoScreen, SincronizacaoScreen } from '@screens/index';
+import { DashboardScreen, TransacoesScreen, OrcamentoScreen, InvestimentosScreen, SincronizacaoScreen } from '@screens/index';
 
-type Screen = 'dashboard' | 'transacoes' | 'orcamento' | 'sincronizacao';
+type Screen = 'dashboard' | 'transacoes' | 'orcamento' | 'investimentos' | 'sincronizacao';
 
 function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('dashboard');
@@ -27,6 +27,7 @@ function App() {
       {currentScreen === 'dashboard' && <DashboardScreen />}
       {currentScreen === 'transacoes' && <TransacoesScreen />}
       {currentScreen === 'orcamento' && <OrcamentoScreen />}
+      {currentScreen === 'investimentos' && <InvestimentosScreen />}
       {currentScreen === 'sincronizacao' && <SincronizacaoScreen />}
     </Layout>
   );
