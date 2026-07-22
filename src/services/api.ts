@@ -405,6 +405,15 @@ class ApiService {
       });
   }
 
+  async getClientes(): Promise<string[]> {
+    await carregarSeguro();
+    const nomes = new Set<string>();
+    cache.transacoes
+      .filter((t) => t.tipo === 'receita' && t.descricao)
+      .forEach((t) => nomes.add(t.descricao));
+    return Array.from(nomes).sort();
+  }
+
   // --- Categorias ---
   async getCategorias(): Promise<Categoria[]> {
     await carregarSeguro();

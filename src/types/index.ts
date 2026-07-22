@@ -39,6 +39,7 @@ export const QUEM_OPCOES = ['Isadora', 'Maria', 'Outros'];
 // Opções que espelham a aba "A receber 2026" (receitas do negócio).
 export const OQUE_OPCOES = ['Testes', 'Consultoria', 'Parceria', 'Outro'];
 export const SITUACAO_OPCOES = ['Cobrar', 'Cobrado - saber se pagou', 'Recebido', 'Cancelado'];
+export const FORMAS_RECEBIMENTO = ['Pix PF', 'Pix PJ', 'Boleto PJ', 'Boleto PF', 'Transferência', 'Outro'];
 export const CATEGORIA_RECEITA_PREFIXO = 'Receita: ';
 
 // Só situação "Recebido" conta como dinheiro que já entrou de fato.

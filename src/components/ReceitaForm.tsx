@@ -1,24 +1,25 @@
 import React, { useState } from 'react';
-import { Transacao, OQUE_OPCOES, SITUACAO_OPCOES, CATEGORIA_RECEITA_PREFIXO } from '@/types/index';
+import { Transacao, OQUE_OPCOES, SITUACAO_OPCOES, FORMAS_RECEBIMENTO, CATEGORIA_RECEITA_PREFIXO } from '@/types/index';
 
 interface ReceitaFormProps {
   transacao?: Transacao;
+  clientes?: string[];
   onSave: (data: Omit<Transacao, 'id' | 'criadoEm' | 'atualizadoEm'>) => Promise<void>;
   onCancel: () => void;
   isLoading?: boolean;
 }
 
-export function ReceitaForm({ transacao, onSave, onCancel, isLoading }: ReceitaFormProps) {
+export function ReceitaForm({ transacao, clientes = [], onSave, onCancel, isLoading }: ReceitaFormProps) {
   const oqueInicial = transacao?.categoriaId?.replace(CATEGORIA_RECEITA_PREFIXO, '') || OQUE_OPCOES[0];
 
   const [formData, setFormData] = useState({
     dataTransacao: transacao?.dataTransacao || new Date().toISOString().split('T')[0],
-    descricao: transacao?.descricao || '', // Cliente
+    descricao: transacao?.descricao || '',
     cidade: transacao?.cidade || '',
     oque: oqueInicial,
     candidato: transacao?.candidato || '',
     valor: transacao?.valor?.toString() || '',
-    metodoPagamento: transacao?.metodoPagamento || '', // Via
+    metodoPagamento: transacao?.metodoPagamento || FORMAS_RECEBIMENTO[0],
     situacao: transacao?.situacao || SITUACAO_OPCOES[0],
   });
 
@@ -68,7 +69,7 @@ export function ReceitaForm({ transacao, onSave, onCancel, isLoading }: ReceitaF
     'w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500';
 
   return (
-    <div className="bg-white rounded-lg shadow p-6">
+    <div className="bg-white rounded-lg shadow p-6 border-l-4 border-green-500">
       <h2 className="text-xl font-semibold mb-4">
         {transacao ? 'Editar recebimento' : 'Novo recebimento'} <span className="text-sm font-normal text-gray-500">(negócio)</span>
       </h2>
@@ -113,10 +114,17 @@ export function ReceitaForm({ transacao, onSave, onCancel, isLoading }: ReceitaF
               type="text"
               value={formData.descricao}
               onChange={(e) => set('descricao', e.target.value)}
-              placeholder="Ex: O Boticário, RR Contas..."
+              list="clientes-list"
+              placeholder="Digite ou selecione um cliente..."
               className={inputCls}
               required
+              autoComplete="off"
             />
+            <datalist id="clientes-list">
+              {clientes.map((c) => (
+                <option key={c} value={c} />
+              ))}
+            </datalist>
           </div>
 
           <div>
@@ -155,13 +163,15 @@ export function ReceitaForm({ transacao, onSave, onCancel, isLoading }: ReceitaF
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Via (forma de recebimento)</label>
-            <input
-              type="text"
+            <select
               value={formData.metodoPagamento}
               onChange={(e) => set('metodoPagamento', e.target.value)}
-              placeholder="Ex: Pix, Boleto Nu..."
               className={inputCls}
-            />
+            >
+              {FORMAS_RECEBIMENTO.map((f) => (
+                <option key={f} value={f}>{f}</option>
+              ))}
+            </select>
           </div>
 
           <div>

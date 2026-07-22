@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Transacao, Categoria } from '@/types/index';
 import { apiService } from '@services/api';
 import { TransacaoForm } from '@components/TransacaoForm';
@@ -9,20 +9,25 @@ const MIN_MES = 6;
 const MIN_ANO = 2026;
 const antesDoMinimo = (m: number, a: number) => a < MIN_ANO || (a === MIN_ANO && m < MIN_MES);
 
+type AbaAtiva = 'todas' | 'despesas' | 'receitas';
+
 export function TransacoesScreen() {
   const [transacoes, setTransacoes] = useState<Transacao[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
+  const [clientes, setClientes] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [novoTipo, setNovoTipo] = useState<'despesa' | 'receita'>('despesa');
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [abaAtiva, setAbaAtiva] = useState<AbaAtiva>('todas');
   const [filtros, setFiltros] = useState({
     categoria: '',
-    tipo: '',
     dataInicio: '',
     dataFim: '',
   });
+
+  const formRef = useRef<HTMLDivElement>(null);
 
   const inicial = (() => {
     const hoje = new Date();
@@ -37,22 +42,36 @@ export function TransacoesScreen() {
 
   useEffect(() => {
     loadData();
-    // Atualiza a lista quando a gravação em segundo plano (otimista) for
-    // confirmada pela planilha, ou quando uma atualização automática chegar.
     const cancelar = apiService.onDadosAtualizados(() => loadData());
     return cancelar;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mes, ano]);
 
+  useEffect(() => {
+    if (showForm && formRef.current) {
+      formRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [showForm, editingId]);
+
   const loadData = async () => {
     try {
       setError('');
-      const [txs, cats] = await Promise.all([
+      const [txsMes, txsTodas, cats, cls] = await Promise.all([
         apiService.getTransacoes(mes, ano),
+        apiService.getTransacoes(),
         apiService.getCategorias(),
+        apiService.getClientes(),
       ]);
-      setTransacoes(txs || []);
+      const receitas = txsTodas.filter((t) => t.tipo === 'receita');
+      const despesasMes = txsMes.filter((t) => t.tipo === 'despesa');
+      const receitasMes = txsMes.filter((t) => t.tipo === 'receita');
+      const dedupIds = new Set(receitasMes.map((t) => t.id));
+      const receitasExtras = receitas.filter((t) => !dedupIds.has(t.id));
+      const combinadas = [...despesasMes, ...receitasMes, ...receitasExtras]
+        .sort((a, b) => new Date(b.dataTransacao).getTime() - new Date(a.dataTransacao).getTime());
+      setTransacoes(combinadas);
       setCategorias(cats || []);
+      setClientes(cls || []);
     } catch (err) {
       setError('Erro ao carregar transações');
       console.error(err);
@@ -110,8 +129,9 @@ export function TransacoesScreen() {
   };
 
   const filteredTransacoes = transacoes.filter((tx) => {
+    if (abaAtiva === 'despesas' && tx.tipo !== 'despesa') return false;
+    if (abaAtiva === 'receitas' && tx.tipo !== 'receita') return false;
     if (filtros.categoria && tx.categoriaId !== filtros.categoria) return false;
-    if (filtros.tipo && tx.tipo !== filtros.tipo) return false;
     if (filtros.dataInicio && tx.dataTransacao < filtros.dataInicio) return false;
     if (filtros.dataFim && tx.dataTransacao > filtros.dataFim) return false;
     return true;
@@ -121,8 +141,23 @@ export function TransacoesScreen() {
     new Date(ano, mes - 1)
   );
 
+  const totalDespesas = filteredTransacoes
+    .filter((t) => t.tipo === 'despesa')
+    .reduce((s, t) => s + t.valor, 0);
+  const totalReceitas = filteredTransacoes
+    .filter((t) => t.tipo === 'receita')
+    .reduce((s, t) => s + t.valor, 0);
+  const fmt = (v: number) =>
+    `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  const abas: { id: AbaAtiva; label: string; count: number }[] = [
+    { id: 'todas', label: 'Todas', count: transacoes.length },
+    { id: 'despesas', label: 'Despesas', count: transacoes.filter((t) => t.tipo === 'despesa').length },
+    { id: 'receitas', label: 'Receitas', count: transacoes.filter((t) => t.tipo === 'receita').length },
+  ];
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Month Navigation */}
       <div className="flex items-center justify-between bg-white rounded-lg shadow p-4">
         <button
@@ -144,48 +179,94 @@ export function TransacoesScreen() {
         </div>
       )}
 
-      {/* Form */}
-      {showForm && (
-        <div className="space-y-3">
-          {!editingId && (
-            <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setNovoTipo('despesa')}
-                className={`px-4 py-2 text-sm font-medium transition ${
-                  novoTipo === 'despesa' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                💳 Despesa
-              </button>
-              <button
-                type="button"
-                onClick={() => setNovoTipo('receita')}
-                className={`px-4 py-2 text-sm font-medium transition ${
-                  novoTipo === 'receita' ? 'bg-green-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                💰 Recebimento (negócio)
-              </button>
+      {/* Tabs: Todas / Despesas / Receitas */}
+      <div className="flex gap-1 bg-white rounded-lg shadow p-1">
+        {abas.map((aba) => (
+          <button
+            key={aba.id}
+            onClick={() => setAbaAtiva(aba.id)}
+            className={`flex-1 py-2.5 px-3 text-sm font-medium rounded-md transition ${
+              abaAtiva === aba.id
+                ? aba.id === 'despesas'
+                  ? 'bg-red-100 text-red-700'
+                  : aba.id === 'receitas'
+                  ? 'bg-green-100 text-green-700'
+                  : 'bg-blue-100 text-blue-700'
+                : 'text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            {aba.label}
+            <span className="ml-1.5 text-xs opacity-70">({aba.count})</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Resumo do filtro ativo */}
+      {!loading && filteredTransacoes.length > 0 && (
+        <div className="flex gap-3 text-sm">
+          {(abaAtiva === 'todas' || abaAtiva === 'despesas') && totalDespesas > 0 && (
+            <div className="bg-red-50 text-red-700 px-3 py-1.5 rounded-lg font-medium">
+              Despesas: {fmt(totalDespesas)}
             </div>
           )}
-
-          {formularioEhReceita ? (
-            <ReceitaForm transacao={editingTx} onSave={handleSave} onCancel={handleCancel} isLoading={loading} />
-          ) : (
-            <TransacaoForm
-              transacao={editingTx}
-              categorias={categorias}
-              onSave={handleSave}
-              onCancel={handleCancel}
-              isLoading={loading}
-            />
+          {(abaAtiva === 'todas' || abaAtiva === 'receitas') && totalReceitas > 0 && (
+            <div className="bg-green-50 text-green-700 px-3 py-1.5 rounded-lg font-medium">
+              Receitas: {fmt(totalReceitas)}
+            </div>
           )}
         </div>
       )}
 
+      {/* Form (with ref for auto-scroll) */}
+      <div ref={formRef}>
+        {showForm && (
+          <div className="space-y-3">
+            {!editingId && (
+              <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setNovoTipo('despesa')}
+                  className={`px-4 py-2 text-sm font-medium transition ${
+                    novoTipo === 'despesa' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  Despesa
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNovoTipo('receita')}
+                  className={`px-4 py-2 text-sm font-medium transition ${
+                    novoTipo === 'receita' ? 'bg-green-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  Recebimento (negócio)
+                </button>
+              </div>
+            )}
+
+            {formularioEhReceita ? (
+              <ReceitaForm
+                transacao={editingTx}
+                clientes={clientes}
+                onSave={handleSave}
+                onCancel={handleCancel}
+                isLoading={loading}
+              />
+            ) : (
+              <TransacaoForm
+                transacao={editingTx}
+                categorias={categorias}
+                onSave={handleSave}
+                onCancel={handleCancel}
+                isLoading={loading}
+              />
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Controls */}
-      <div className="flex flex-col sm:flex-row gap-4">
+      <div className="flex flex-col sm:flex-row gap-3">
         <button
           onClick={() => {
             setEditingId(null);
@@ -197,29 +278,21 @@ export function TransacoesScreen() {
         </button>
 
         {/* Filters */}
-        <div className="flex-1 flex flex-col sm:flex-row gap-3">
-          <select
-            value={filtros.categoria}
-            onChange={(e) => setFiltros({ ...filtros, categoria: e.target.value })}
-            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="">Todas as categorias</option>
-            {categorias.map((cat) => (
-              <option key={cat.id} value={cat.id}>
-                {cat.nome}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={filtros.tipo}
-            onChange={(e) => setFiltros({ ...filtros, tipo: e.target.value })}
-            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="">Todos os tipos</option>
-            <option value="receita">Receita</option>
-            <option value="despesa">Despesa</option>
-          </select>
+        <div className="flex-1 flex flex-col sm:flex-row gap-2">
+          {abaAtiva !== 'receitas' && (
+            <select
+              value={filtros.categoria}
+              onChange={(e) => setFiltros({ ...filtros, categoria: e.target.value })}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Todas as categorias</option>
+              {categorias.map((cat) => (
+                <option key={cat.id} value={cat.id}>
+                  {cat.nome}
+                </option>
+              ))}
+            </select>
+          )}
 
           <input
             type="date"
@@ -237,12 +310,14 @@ export function TransacoesScreen() {
             placeholder="Data fim"
           />
 
-          <button
-            onClick={() => setFiltros({ categoria: '', tipo: '', dataInicio: '', dataFim: '' })}
-            className="px-3 py-2 border border-gray-300 hover:bg-gray-50 rounded-lg text-sm transition"
-          >
-            Limpar
-          </button>
+          {(filtros.categoria || filtros.dataInicio || filtros.dataFim) && (
+            <button
+              onClick={() => setFiltros({ categoria: '', dataInicio: '', dataFim: '' })}
+              className="px-3 py-2 border border-gray-300 hover:bg-gray-50 rounded-lg text-sm transition"
+            >
+              Limpar filtros
+            </button>
+          )}
         </div>
       </div>
 
@@ -258,21 +333,6 @@ export function TransacoesScreen() {
           onEdit={handleEdit}
           onDelete={handleDelete}
         />
-      )}
-
-      {filteredTransacoes.length === 0 && !loading && (
-        <div className="bg-white rounded-lg shadow p-8 text-center">
-          <p className="text-gray-600 text-lg">Nenhum lançamento encontrado</p>
-          <button
-            onClick={() => {
-              setEditingId(null);
-              setShowForm(true);
-            }}
-            className="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition"
-          >
-            Adicionar primeiro lançamento
-          </button>
-        </div>
       )}
     </div>
   );
