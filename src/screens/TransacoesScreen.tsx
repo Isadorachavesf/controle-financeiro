@@ -15,6 +15,7 @@ export function TransacoesScreen() {
   const [transacoes, setTransacoes] = useState<Transacao[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [clientes, setClientes] = useState<string[]>([]);
+  const [categoriasReceita, setCategoriasReceita] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -56,11 +57,12 @@ export function TransacoesScreen() {
   const loadData = async () => {
     try {
       setError('');
-      const [txsMes, txsTodas, cats, cls] = await Promise.all([
+      const [txsMes, txsTodas, cats, cls, catsReceita] = await Promise.all([
         apiService.getTransacoes(mes, ano),
         apiService.getTransacoes(),
         apiService.getCategorias(),
         apiService.getClientes(),
+        apiService.getCategoriasReceita(),
       ]);
       const receitas = txsTodas.filter((t) => t.tipo === 'receita');
       const despesasMes = txsMes.filter((t) => t.tipo === 'despesa');
@@ -72,6 +74,7 @@ export function TransacoesScreen() {
       setTransacoes(combinadas);
       setCategorias(cats || []);
       setClientes(cls || []);
+      setCategoriasReceita(catsReceita || []);
     } catch (err) {
       setError('Erro ao carregar transações');
       console.error(err);
@@ -248,6 +251,7 @@ export function TransacoesScreen() {
               <ReceitaForm
                 transacao={editingTx}
                 clientes={clientes}
+                categoriasReceita={categoriasReceita}
                 onSave={handleSave}
                 onCancel={handleCancel}
                 isLoading={loading}

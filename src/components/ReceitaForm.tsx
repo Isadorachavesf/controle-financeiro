@@ -4,13 +4,15 @@ import { Transacao, OQUE_OPCOES, SITUACAO_OPCOES, FORMAS_RECEBIMENTO, CATEGORIA_
 interface ReceitaFormProps {
   transacao?: Transacao;
   clientes?: string[];
+  categoriasReceita?: string[];
   onSave: (data: Omit<Transacao, 'id' | 'criadoEm' | 'atualizadoEm'>) => Promise<void>;
   onCancel: () => void;
   isLoading?: boolean;
 }
 
-export function ReceitaForm({ transacao, clientes = [], onSave, onCancel, isLoading }: ReceitaFormProps) {
-  const oqueInicial = transacao?.categoriaId?.replace(CATEGORIA_RECEITA_PREFIXO, '') || OQUE_OPCOES[0];
+export function ReceitaForm({ transacao, clientes = [], categoriasReceita, onSave, onCancel, isLoading }: ReceitaFormProps) {
+  const opcoesOque = categoriasReceita && categoriasReceita.length ? categoriasReceita : OQUE_OPCOES;
+  const oqueInicial = transacao?.categoriaId?.replace(CATEGORIA_RECEITA_PREFIXO, '') || opcoesOque[0];
 
   const [formData, setFormData] = useState({
     dataTransacao: transacao?.dataTransacao || new Date().toISOString().split('T')[0],
@@ -140,7 +142,7 @@ export function ReceitaForm({ transacao, clientes = [], onSave, onCancel, isLoad
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">O que</label>
             <select value={formData.oque} onChange={(e) => set('oque', e.target.value)} className={inputCls}>
-              {OQUE_OPCOES.map((o) => (
+              {opcoesOque.map((o) => (
                 <option key={o} value={o}>
                   {o}
                 </option>

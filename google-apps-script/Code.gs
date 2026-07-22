@@ -24,6 +24,12 @@ var COLUNAS_ORCAMENTOS = ['nome', 'limiteMensal', 'corGrafico'];
 var ABA_RECEBER = 'A receber 2026';
 var HEADER_RECEBER = ['DATA', 'CLIENTE', 'CIDADE', 'CANDIDATO', 'O QUE', 'VALOR', 'VIA', 'SITUAÇÃO'];
 
+// Cadastros auxiliares para o formulário de recebimento (facilita preencher
+// e dá indicadores por cliente/categoria mesmo antes do primeiro lançamento).
+var ABA_CLIENTES = '_Clientes';
+var ABA_CATEGORIAS_RECEITA = '_CategoriasReceita';
+var OQUE_PADRAO = ['Testes', 'Consultoria', 'Parceria', 'Outro'];
+
 // Cabeçalho padrão usado ao criar uma aba de mês que ainda não existe.
 var HEADER_PADRAO = [
   'Código', 'Data', 'Compra', 'Categoria', 'Forma de pagamento',
@@ -62,7 +68,12 @@ function handle(e, metodo) {
       case 'bootstrap':
         // Lê as transações UMA vez e reaproveita para montar as categorias.
         var _txs = lerTransacoes().concat(lerReceitasNegocio());
-        resultado = { categorias: lerCategorias(_txs), transacoes: _txs };
+        resultado = {
+          categorias: lerCategorias(_txs),
+          transacoes: _txs,
+          clientesCadastrados: lerClientesCadastrados(),
+          categoriasReceita: lerCategoriasReceita()
+        };
         break;
       case 'getTransacoes': resultado = lerTransacoes().concat(lerReceitasNegocio()); break;
       case 'getCategorias': resultado = lerCategorias(); break;
@@ -78,6 +89,12 @@ function handle(e, metodo) {
         break;
       case 'createCategoria': resultado = upsertCategoria(payload); break;
       case 'updateCategoria': resultado = upsertCategoria(payload); break;
+      case 'getClientesCadastrados': resultado = lerClientesCadastrados(); break;
+      case 'criarCliente': resultado = criarNomeEmLista(ABA_CLIENTES, payload.nome); break;
+      case 'deletarCliente': deletarNomeDeLista(ABA_CLIENTES, payload.nome); resultado = { ok: true }; break;
+      case 'getCategoriasReceita': resultado = lerCategoriasReceita(); break;
+      case 'criarCategoriaReceita': resultado = criarNomeEmLista(ABA_CATEGORIAS_RECEITA, payload.nome); break;
+      case 'deletarCategoriaReceita': deletarNomeDeLista(ABA_CATEGORIAS_RECEITA, payload.nome); resultado = { ok: true }; break;
       default: resultado = { error: 'Ação desconhecida: ' + acao };
     }
     return json({ success: true, data: resultado });
@@ -404,6 +421,64 @@ function deletarReceita(id) {
   var linhaNum = parseInt(String(id).split('||')[1], 10);
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ABA_RECEBER);
   if (sheet && linhaNum) sheet.deleteRow(linhaNum);
+}
+
+// ---------------------------------------------------------------------------
+// Cadastros auxiliares: clientes e categorias de recebimento
+// Cada um é uma aba própria com uma coluna só (nome), para facilitar
+// preencher o formulário de recebimento e calcular indicadores por
+// cliente/categoria mesmo antes do primeiro lançamento.
+// ---------------------------------------------------------------------------
+
+function garantirAbaLista(nomeAba) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(nomeAba);
+  if (!sheet) {
+    sheet = ss.insertSheet(nomeAba);
+    sheet.getRange(1, 1, 1, 1).setValues([['nome']]);
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function lerNomesDaLista(nomeAba) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(nomeAba);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  return sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues()
+    .map(function (l) { return String(l[0] || '').trim(); })
+    .filter(Boolean);
+}
+
+function criarNomeEmLista(nomeAba, nome) {
+  nome = String(nome || '').trim();
+  if (!nome) throw 'Nome vazio';
+  var sheet = garantirAbaLista(nomeAba);
+  var existentes = lerNomesDaLista(nomeAba);
+  var jaExiste = existentes.some(function (n) { return n.toLowerCase() === nome.toLowerCase(); });
+  if (!jaExiste) sheet.appendRow([nome]);
+  return { nome: nome };
+}
+
+function deletarNomeDeLista(nomeAba, nome) {
+  nome = String(nome || '').trim();
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(nomeAba);
+  if (!sheet || sheet.getLastRow() < 2) return;
+  var valores = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
+  for (var i = 0; i < valores.length; i++) {
+    if (String(valores[i][0] || '').trim().toLowerCase() === nome.toLowerCase()) {
+      sheet.deleteRow(i + 2);
+      return;
+    }
+  }
+}
+
+function lerClientesCadastrados() {
+  return lerNomesDaLista(ABA_CLIENTES);
+}
+
+function lerCategoriasReceita() {
+  var nomes = lerNomesDaLista(ABA_CATEGORIAS_RECEITA);
+  return nomes.length ? nomes : OQUE_PADRAO.slice();
 }
 
 // ---------------------------------------------------------------------------

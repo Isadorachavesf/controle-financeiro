@@ -63,6 +63,12 @@ export function InvestimentosScreen() {
   // já que o app não rastreia saldo investido — só entradas/saídas do dia a dia).
   const [reservaAtual, setReservaAtual] = useState<string>(() => localStorage.getItem(STORAGE_RESERVA) || '0');
 
+  // Cadastro de clientes e categorias de recebimento
+  const [clientes, setClientes] = useState<string[]>([]);
+  const [categoriasReceita, setCategoriasReceita] = useState<string[]>([]);
+  const [novoCliente, setNovoCliente] = useState('');
+  const [novaCategoriaReceita, setNovaCategoriaReceita] = useState('');
+
   useEffect(() => {
     load();
     const cancelar = apiService.onDadosAtualizados(() => load());
@@ -71,8 +77,14 @@ export function InvestimentosScreen() {
 
   const load = async () => {
     try {
-      const todas = await apiService.getTransacoes();
+      const [todas, cls, catsReceita] = await Promise.all([
+        apiService.getTransacoes(),
+        apiService.getClientes(),
+        apiService.getCategoriasReceita(),
+      ]);
       setTodasTransacoes(todas);
+      setClientes(cls || []);
+      setCategoriasReceita(catsReceita || []);
     } finally {
       setLoading(false);
     }
@@ -81,6 +93,29 @@ export function InvestimentosScreen() {
   const salvarReserva = (v: string) => {
     setReservaAtual(v);
     localStorage.setItem(STORAGE_RESERVA, v);
+  };
+
+  const handleAddCliente = async () => {
+    const nome = novoCliente.trim();
+    if (!nome) return;
+    await apiService.criarCliente(nome);
+    setNovoCliente('');
+    await load();
+  };
+  const handleRemoveCliente = async (nome: string) => {
+    await apiService.deletarCliente(nome);
+    await load();
+  };
+  const handleAddCategoriaReceita = async () => {
+    const nome = novaCategoriaReceita.trim();
+    if (!nome) return;
+    await apiService.criarCategoriaReceita(nome);
+    setNovaCategoriaReceita('');
+    await load();
+  };
+  const handleRemoveCategoriaReceita = async (nome: string) => {
+    await apiService.deletarCategoriaReceita(nome);
+    await load();
   };
 
   // --- Análise dos últimos meses reais ---
@@ -122,6 +157,9 @@ export function InvestimentosScreen() {
     const porServico = new Map<string, number>();
     recebido.forEach((t) => porServico.set(t.categoriaId, (porServico.get(t.categoriaId) || 0) + t.valor));
 
+    const porCliente = new Map<string, number>();
+    recebido.forEach((t) => porCliente.set(t.descricao, (porCliente.get(t.descricao) || 0) + t.valor));
+
     return {
       totalRecebido: recebido.reduce((s, t) => s + t.valor, 0),
       totalPendente: pendente.reduce((s, t) => s + t.valor, 0),
@@ -129,6 +167,10 @@ export function InvestimentosScreen() {
       porServico: Array.from(porServico.entries())
         .map(([nome, valor]) => ({ nome, valor }))
         .sort((a, b) => b.valor - a.valor),
+      porCliente: Array.from(porCliente.entries())
+        .map(([nome, valor]) => ({ nome, valor }))
+        .sort((a, b) => b.valor - a.valor)
+        .slice(0, 8),
     };
   }, [todasTransacoes]);
 
@@ -250,7 +292,9 @@ export function InvestimentosScreen() {
       {(negocio.totalRecebido > 0 || negocio.totalPendente > 0) && (
         <div className="bg-white rounded-lg shadow p-6">
           <h3 className="font-semibold mb-1">💼 Receita do negócio</h3>
-          <p className="text-sm text-gray-500 mb-4">Da aba "A receber 2026" — consultoria, testes e parcerias.</p>
+          <p className="text-sm text-gray-500 mb-4">
+            Da aba "A receber 2026" — consultoria, testes e parcerias, a partir de junho/2026.
+          </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
             <div className="bg-green-50 rounded-lg p-4">
@@ -265,19 +309,119 @@ export function InvestimentosScreen() {
             </div>
           </div>
 
-          {negocio.porServico.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-sm text-gray-600 font-medium">Recebido por tipo de serviço</p>
-              {negocio.porServico.map((s) => (
-                <div key={s.nome} className="flex justify-between text-sm border-b last:border-b-0 py-1.5">
-                  <span className="text-gray-700">{s.nome.replace('Receita: ', '')}</span>
-                  <span className="font-medium">{fmt(s.valor)}</span>
-                </div>
-              ))}
-            </div>
-          )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            {negocio.porServico.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm text-gray-600 font-medium">Recebido por tipo de serviço</p>
+                {negocio.porServico.map((s) => (
+                  <div key={s.nome} className="flex justify-between text-sm border-b last:border-b-0 py-1.5">
+                    <span className="text-gray-700">{s.nome.replace('Receita: ', '')}</span>
+                    <span className="font-medium">{fmt(s.valor)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {negocio.porCliente.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm text-gray-600 font-medium">Recebido por cliente (top 8)</p>
+                {negocio.porCliente.map((c) => (
+                  <div key={c.nome} className="flex justify-between text-sm border-b last:border-b-0 py-1.5">
+                    <span className="text-gray-700 truncate mr-2">{c.nome}</span>
+                    <span className="font-medium whitespace-nowrap">{fmt(c.valor)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
+
+      {/* Cadastro de clientes e categorias de recebimento */}
+      <div className="bg-white rounded-lg shadow p-6">
+        <h3 className="font-semibold mb-1">🗂️ Clientes e categorias de recebimento</h3>
+        <p className="text-sm text-gray-500 mb-4">
+          Cadastre aqui para já aparecerem no formulário de recebimento (mesmo antes do primeiro lançamento) e
+          facilitarem os indicadores acima.
+        </p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <div>
+            <p className="text-sm font-medium text-gray-700 mb-2">Clientes</p>
+            <div className="flex gap-2 mb-3">
+              <input
+                type="text"
+                value={novoCliente}
+                onChange={(e) => setNovoCliente(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddCliente(); } }}
+                placeholder="Nome do cliente"
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                onClick={handleAddCliente}
+                className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition"
+              >
+                Adicionar
+              </button>
+            </div>
+            {clientes.length === 0 ? (
+              <p className="text-sm text-gray-400">Nenhum cliente cadastrado ainda.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto">
+                {clientes.map((c) => (
+                  <span key={c} className="inline-flex items-center gap-1.5 bg-gray-100 text-gray-700 text-sm px-2.5 py-1 rounded-full">
+                    {c}
+                    <button
+                      onClick={() => handleRemoveCliente(c)}
+                      className="text-gray-400 hover:text-red-600 transition"
+                      title="Remover"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <p className="text-sm font-medium text-gray-700 mb-2">Categorias de recebimento ("O que")</p>
+            <div className="flex gap-2 mb-3">
+              <input
+                type="text"
+                value={novaCategoriaReceita}
+                onChange={(e) => setNovaCategoriaReceita(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddCategoriaReceita(); } }}
+                placeholder="Ex: Palestra, Mentoria..."
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                onClick={handleAddCategoriaReceita}
+                className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition"
+              >
+                Adicionar
+              </button>
+            </div>
+            {categoriasReceita.length === 0 ? (
+              <p className="text-sm text-gray-400">Usando as categorias padrão.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto">
+                {categoriasReceita.map((c) => (
+                  <span key={c} className="inline-flex items-center gap-1.5 bg-gray-100 text-gray-700 text-sm px-2.5 py-1 rounded-full">
+                    {c}
+                    <button
+                      onClick={() => handleRemoveCategoriaReceita(c)}
+                      className="text-gray-400 hover:text-red-600 transition"
+                      title="Remover"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* Reserva de emergência */}
       <div className="bg-white rounded-lg shadow p-6">

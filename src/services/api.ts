@@ -1,4 +1,4 @@
-import { Transacao, Categoria, DashboardData, SincronizacaoStatus, receitaRealizada } from '@/types/index';
+import { Transacao, Categoria, DashboardData, SincronizacaoStatus, receitaRealizada, OQUE_OPCOES } from '@/types/index';
 
 // ---------------------------------------------------------------------------
 // Camada de dados do aplicativo.
@@ -18,6 +18,8 @@ import { Transacao, Categoria, DashboardData, SincronizacaoStatus, receitaRealiz
 const STORAGE_KEYS = {
   transacoes: 'cf_transacoes',
   categorias: 'cf_categorias',
+  clientesCadastrados: 'cf_clientes_cadastrados',
+  categoriasReceita: 'cf_categorias_receita',
   appsScriptUrl: 'cf_apps_script_url',
 };
 
@@ -74,11 +76,22 @@ export function isConectado(): boolean {
 interface Cache {
   categorias: Categoria[];
   transacoes: Transacao[];
+  clientesCadastrados: string[];
+  categoriasReceita: string[];
   loadedAt: number;
 }
-const cache: Cache = { categorias: [], transacoes: [], loadedAt: 0 };
+const cache: Cache = { categorias: [], transacoes: [], clientesCadastrados: [], categoriasReceita: [], loadedAt: 0 };
 
-function lerCacheLocal(): { categorias: Categoria[]; transacoes: Transacao[] } {
+function lerListaJson(key: string): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(key) || '[]');
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
+function lerCacheLocal(): { categorias: Categoria[]; transacoes: Transacao[]; clientesCadastrados: string[]; categoriasReceita: string[] } {
   let categorias: Categoria[];
   try {
     categorias = JSON.parse(localStorage.getItem(STORAGE_KEYS.categorias) || '');
@@ -93,12 +106,19 @@ function lerCacheLocal(): { categorias: Categoria[]; transacoes: Transacao[] } {
   } catch {
     transacoes = [];
   }
-  return { categorias, transacoes };
+  return {
+    categorias,
+    transacoes,
+    clientesCadastrados: lerListaJson(STORAGE_KEYS.clientesCadastrados),
+    categoriasReceita: lerListaJson(STORAGE_KEYS.categoriasReceita),
+  };
 }
 
 function salvarCacheLocal(): void {
   localStorage.setItem(STORAGE_KEYS.categorias, JSON.stringify(cache.categorias));
   localStorage.setItem(STORAGE_KEYS.transacoes, JSON.stringify(cache.transacoes));
+  localStorage.setItem(STORAGE_KEYS.clientesCadastrados, JSON.stringify(cache.clientesCadastrados));
+  localStorage.setItem(STORAGE_KEYS.categoriasReceita, JSON.stringify(cache.categoriasReceita));
 }
 
 // --- Comunicação com o Apps Script ---
@@ -161,6 +181,8 @@ function garantirCacheLocalSync(): void {
     const local = lerCacheLocal();
     cache.categorias = local.categorias;
     cache.transacoes = local.transacoes;
+    cache.clientesCadastrados = local.clientesCadastrados;
+    cache.categoriasReceita = local.categoriasReceita;
   }
 }
 
@@ -192,6 +214,8 @@ function buscarDaRede(): Promise<void> {
       cache.transacoes = txs;
       // Re-adiciona criações ainda não confirmadas (não existem na planilha ainda).
       pendingCreates.forEach((tx) => cache.transacoes.push(tx));
+      cache.clientesCadastrados = remoto.clientesCadastrados || [];
+      cache.categoriasReceita = remoto.categoriasReceita || [];
       cache.loadedAt = Date.now();
       salvarCacheLocal();
     })().finally(() => { cargaEmAndamento = null; });
@@ -255,6 +279,22 @@ export function competenciaDe(tx: Transacao): string {
   return tx.dataTransacao ? tx.dataTransacao.slice(0, 7) : '';
 }
 
+// O controle financeiro só considera lançamentos a partir de junho/2026 —
+// tanto despesas quanto receitas. Dados antigos (ex.: recebimentos de
+// janeiro-maio/2026 na aba "A receber 2026") ficam de fora de TODOS os
+// totais, gráficos e indicadores do app.
+const ESCOPO_MIN_ANO = 2026;
+const ESCOPO_MIN_MES = 6;
+function dentroDoEscopo(tx: Transacao): boolean {
+  const comp = competenciaDe(tx);
+  if (!comp) return true; // sem competência identificável: não filtra por segurança
+  const m = /^(\d{4})-(\d{2})/.exec(comp);
+  if (!m) return true;
+  const ano = Number(m[1]);
+  const mes = Number(m[2]);
+  return ano > ESCOPO_MIN_ANO || (ano === ESCOPO_MIN_ANO && mes >= ESCOPO_MIN_MES);
+}
+
 // Mantém lançamentos das ABAS DE MÊS + receitas do negócio ("A receber
 // 2026", lidas à parte pelo Apps Script). Ignora abas auxiliares de
 // consolidação ("Base de dados", "CNPJs clientes"…), que duplicavam totais.
@@ -286,7 +326,7 @@ class ApiService {
   // --- Transacoes ---
   async getTransacoes(mes?: number, ano?: number, categoriaId?: string): Promise<Transacao[]> {
     await carregarSeguro();
-    let txs = cache.transacoes;
+    let txs = cache.transacoes.filter(dentroDoEscopo);
     if (mes !== undefined && ano !== undefined) {
       txs = txs.filter((t) => pertenceAo(t, mes, ano));
     }
@@ -405,13 +445,76 @@ class ApiService {
       });
   }
 
+  // Lista de clientes para o formulário de recebimento: junta os cadastrados
+  // explicitamente (aba "_Clientes", podem existir antes de qualquer
+  // lançamento) com os nomes já usados em recebimentos anteriores.
   async getClientes(): Promise<string[]> {
     await carregarSeguro();
-    const nomes = new Set<string>();
+    const nomes = new Set<string>(cache.clientesCadastrados);
     cache.transacoes
-      .filter((t) => t.tipo === 'receita' && t.descricao)
+      .filter((t) => t.tipo === 'receita' && t.descricao && dentroDoEscopo(t))
       .forEach((t) => nomes.add(t.descricao));
     return Array.from(nomes).sort();
+  }
+
+  async criarCliente(nome: string): Promise<void> {
+    await carregarSeguro();
+    const limpo = nome.trim();
+    if (!limpo) return;
+    if (!cache.clientesCadastrados.some((n) => n.toLowerCase() === limpo.toLowerCase())) {
+      cache.clientesCadastrados.push(limpo);
+      salvarCacheLocal();
+    }
+    if (isConectado()) {
+      chamarRemoto('criarCliente', { nome: limpo }).catch((err) =>
+        console.error('Falha ao cadastrar cliente na planilha (mantido localmente):', err)
+      );
+    }
+  }
+
+  async deletarCliente(nome: string): Promise<void> {
+    await carregarSeguro();
+    cache.clientesCadastrados = cache.clientesCadastrados.filter((n) => n !== nome);
+    salvarCacheLocal();
+    if (isConectado()) {
+      chamarRemoto('deletarCliente', { nome }).catch((err) =>
+        console.error('Falha ao remover cliente da planilha:', err)
+      );
+    }
+  }
+
+  // Categorias de recebimento ("O que": Testes, Consultoria...) — cadastráveis
+  // à parte para facilitar o formulário e os indicadores de recebimento.
+  async getCategoriasReceita(): Promise<string[]> {
+    await carregarSeguro();
+    return cache.categoriasReceita.length ? cache.categoriasReceita.slice() : [...OQUE_OPCOES];
+  }
+
+  async criarCategoriaReceita(nome: string): Promise<void> {
+    await carregarSeguro();
+    const limpo = nome.trim();
+    if (!limpo) return;
+    if (!cache.categoriasReceita.length) cache.categoriasReceita = [...OQUE_OPCOES];
+    if (!cache.categoriasReceita.some((n) => n.toLowerCase() === limpo.toLowerCase())) {
+      cache.categoriasReceita.push(limpo);
+      salvarCacheLocal();
+    }
+    if (isConectado()) {
+      chamarRemoto('criarCategoriaReceita', { nome: limpo }).catch((err) =>
+        console.error('Falha ao cadastrar categoria de recebimento na planilha (mantida localmente):', err)
+      );
+    }
+  }
+
+  async deletarCategoriaReceita(nome: string): Promise<void> {
+    await carregarSeguro();
+    cache.categoriasReceita = cache.categoriasReceita.filter((n) => n !== nome);
+    salvarCacheLocal();
+    if (isConectado()) {
+      chamarRemoto('deletarCategoriaReceita', { nome }).catch((err) =>
+        console.error('Falha ao remover categoria de recebimento da planilha:', err)
+      );
+    }
   }
 
   // --- Categorias ---
@@ -492,7 +595,7 @@ class ApiService {
   // --- Dashboard ---
   async getDashboard(mes: number, ano: number): Promise<DashboardData> {
     await carregarSeguro();
-    const txsMes = cache.transacoes.filter((t) => pertenceAo(t, mes, ano));
+    const txsMes = cache.transacoes.filter((t) => dentroDoEscopo(t) && pertenceAo(t, mes, ano));
 
     // Só "Recebido" conta como dinheiro que já entrou (não infla com pendências).
     const totalReceitas = txsMes.filter(receitaRealizada).reduce((s, t) => s + t.valor, 0);
