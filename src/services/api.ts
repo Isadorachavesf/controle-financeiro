@@ -42,6 +42,17 @@ function gerarId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
+// --- Escritas pendentes (salvamento otimista) ---
+// A planilha tem dezenas de abas com fórmulas que recalculam a cada gravação,
+// então uma escrita no Apps Script pode demorar vários segundos. Para o app
+// não travar, aplicamos a mudança no cache IMEDIATAMENTE e disparamos a
+// gravação real em segundo plano. Estes registros evitam que uma atualização
+// em segundo plano (bootstrap) apague uma mudança que ainda não foi
+// confirmada pelo servidor.
+const pendingCreates = new Map<string, Transacao>(); // id temporário -> transação otimista
+const pendingUpdateIds = new Set<string>(); // ids com edição em andamento
+const pendingDeleteIds = new Set<string>(); // ids sendo excluídos
+
 // --- Configuração da conexão com a planilha ---
 export function getAppsScriptUrl(): string {
   const salva = localStorage.getItem(STORAGE_KEYS.appsScriptUrl);
@@ -159,8 +170,28 @@ function buscarDaRede(): Promise<void> {
   if (!cargaEmAndamento) {
     cargaEmAndamento = (async () => {
       const remoto = await chamarRemoto('bootstrap');
-      cache.categorias = remoto.categorias || [];
-      cache.transacoes = (remoto.transacoes || []).filter(ehDeAbaMensal);
+      let txs = (remoto.transacoes || []).filter(ehDeAbaMensal);
+      // Não deixa a planilha "ressuscitar" algo que está sendo excluído agora.
+      if (pendingDeleteIds.size) txs = txs.filter((t) => !pendingDeleteIds.has(t.id));
+      // Preserva a versão local de edições ainda não confirmadas pelo servidor.
+      if (pendingUpdateIds.size) {
+        const locaisPendentes = new Map(cache.transacoes.map((t) => [t.id, t] as const));
+        txs = txs.map((t) => (pendingUpdateIds.has(t.id) ? locaisPendentes.get(t.id) || t : t));
+      }
+      let cats = remoto.categorias || [];
+      // Mesma proteção para categorias/orçamento (id = nome) em edição/criação.
+      if (pendingUpdateIds.size) {
+        const catsLocaisPendentes = new Map(cache.categorias.map((c) => [c.id, c] as const));
+        cats = cats.map((c) => (pendingUpdateIds.has(c.id) ? catsLocaisPendentes.get(c.id) || c : c));
+        // Categoria nova ainda não confirmada: pode não existir no remoto ainda.
+        cache.categorias.forEach((c) => {
+          if (pendingUpdateIds.has(c.id) && !cats.some((r) => r.id === c.id)) cats.push(c);
+        });
+      }
+      cache.categorias = cats;
+      cache.transacoes = txs;
+      // Re-adiciona criações ainda não confirmadas (não existem na planilha ainda).
+      pendingCreates.forEach((tx) => cache.transacoes.push(tx));
       cache.loadedAt = Date.now();
       salvarCacheLocal();
     })().finally(() => { cargaEmAndamento = null; });
@@ -265,41 +296,112 @@ class ApiService {
       .map(comNomeCategoria);
   }
 
+  // Cria a transação: aparece na tela IMEDIATAMENTE (otimista) e é gravada na
+  // planilha em segundo plano. A planilha da Isadora tem dezenas de abas com
+  // fórmulas que recalculam a cada gravação, então esperar a resposta do
+  // Apps Script pode levar vários segundos — não faz sentido travar a tela
+  // para isso.
   async createTransacao(data: Omit<Transacao, 'id' | 'criadoEm' | 'atualizadoEm'>): Promise<Transacao> {
     await carregarSeguro();
-    let tx: Transacao;
-    if (isConectado()) {
-      tx = await chamarRemoto('createTransacao', data);
-    } else {
+
+    if (!isConectado()) {
       const now = new Date().toISOString();
-      tx = { ...(data as any), id: gerarId(), criadoEm: now, atualizadoEm: now };
+      const tx: Transacao = { ...(data as any), id: gerarId(), criadoEm: now, atualizadoEm: now };
+      cache.transacoes.push(tx);
+      salvarCacheLocal();
+      return comNomeCategoria(tx);
     }
-    cache.transacoes.push(tx);
+
+    const tempId = 'local-' + gerarId();
+    const now = new Date().toISOString();
+    const otimista: Transacao = { ...(data as any), id: tempId, criadoEm: now, atualizadoEm: now };
+    cache.transacoes.push(otimista);
+    pendingCreates.set(tempId, otimista);
     salvarCacheLocal();
-    return comNomeCategoria(tx);
+
+    chamarRemoto('createTransacao', data)
+      .then((real: Transacao) => {
+        const idx = cache.transacoes.findIndex((t) => t.id === tempId);
+        if (idx !== -1) cache.transacoes[idx] = real;
+        else cache.transacoes.push(real);
+        pendingCreates.delete(tempId);
+        salvarCacheLocal();
+        notificar();
+      })
+      .catch((err) => {
+        console.error('Falha ao salvar na planilha (mantido localmente, tente sincronizar):', err);
+      });
+
+    return comNomeCategoria(otimista);
   }
 
   async updateTransacao(id: string, data: Partial<Transacao>): Promise<Transacao> {
     await carregarSeguro();
     const idx = cache.transacoes.findIndex((t) => t.id === id);
-    let tx: Transacao;
-    if (isConectado()) {
-      tx = await chamarRemoto('updateTransacao', { id, ...data });
-    } else {
+
+    if (!isConectado()) {
       if (idx === -1) throw new Error('Transação não encontrada');
-      tx = { ...cache.transacoes[idx], ...data, id, atualizadoEm: new Date().toISOString() };
+      const tx = { ...cache.transacoes[idx], ...data, id, atualizadoEm: new Date().toISOString() };
+      cache.transacoes[idx] = tx;
+      salvarCacheLocal();
+      return comNomeCategoria(tx);
     }
-    if (idx === -1) cache.transacoes.push(tx);
-    else cache.transacoes[idx] = tx;
+
+    const otimista: Transacao = {
+      ...(idx !== -1 ? cache.transacoes[idx] : ({} as Transacao)),
+      ...data,
+      id,
+      atualizadoEm: new Date().toISOString(),
+    };
+    if (idx === -1) cache.transacoes.push(otimista);
+    else cache.transacoes[idx] = otimista;
+    pendingUpdateIds.add(id);
     salvarCacheLocal();
-    return comNomeCategoria(tx);
+
+    chamarRemoto('updateTransacao', { id, ...data })
+      .then((real: Transacao) => {
+        const idx2 = cache.transacoes.findIndex((t) => t.id === id);
+        if (idx2 !== -1) cache.transacoes[idx2] = real;
+        else cache.transacoes.push(real);
+        pendingUpdateIds.delete(id);
+        salvarCacheLocal();
+        notificar();
+      })
+      .catch((err) => {
+        pendingUpdateIds.delete(id);
+        console.error('Falha ao atualizar na planilha (mantido localmente, tente sincronizar):', err);
+      });
+
+    return comNomeCategoria(otimista);
   }
 
   async deleteTransacao(id: string): Promise<void> {
     await carregarSeguro();
-    if (isConectado()) await chamarRemoto('deleteTransacao', { id });
+
+    if (!isConectado()) {
+      cache.transacoes = cache.transacoes.filter((t) => t.id !== id);
+      salvarCacheLocal();
+      return;
+    }
+
+    const removida = cache.transacoes.find((t) => t.id === id);
     cache.transacoes = cache.transacoes.filter((t) => t.id !== id);
+    pendingDeleteIds.add(id);
     salvarCacheLocal();
+
+    chamarRemoto('deleteTransacao', { id })
+      .then(() => {
+        pendingDeleteIds.delete(id);
+      })
+      .catch((err) => {
+        pendingDeleteIds.delete(id);
+        console.error('Falha ao excluir na planilha, restaurando localmente:', err);
+        if (removida) {
+          cache.transacoes.push(removida);
+          salvarCacheLocal();
+          notificar();
+        }
+      });
   }
 
   // --- Categorias ---
@@ -308,33 +410,73 @@ class ApiService {
     return cache.categorias.slice();
   }
 
+  // O id da categoria é o próprio nome (previsível), então a gravação otimista
+  // não precisa de id temporário — já sabemos o id final de antemão.
   async createCategoria(data: Omit<Categoria, 'id' | 'criadoEm'>): Promise<Categoria> {
     await carregarSeguro();
-    let cat: Categoria;
-    if (isConectado()) {
-      cat = await chamarRemoto('createCategoria', data);
-    } else {
-      cat = { ...(data as any), id: gerarId(), criadoEm: new Date().toISOString() };
+
+    if (!isConectado()) {
+      const cat: Categoria = { ...(data as any), id: gerarId(), criadoEm: new Date().toISOString() };
+      cache.categorias.push(cat);
+      salvarCacheLocal();
+      return cat;
     }
-    cache.categorias.push(cat);
+
+    const otimista: Categoria = { ...(data as any), id: data.nome, criadoEm: new Date().toISOString() };
+    cache.categorias.push(otimista);
+    pendingUpdateIds.add(otimista.id);
     salvarCacheLocal();
-    return cat;
+
+    chamarRemoto('createCategoria', data)
+      .then((real: Categoria) => {
+        const idx = cache.categorias.findIndex((c) => c.id === otimista.id);
+        if (idx !== -1) cache.categorias[idx] = real;
+        else cache.categorias.push(real);
+        pendingUpdateIds.delete(otimista.id);
+        salvarCacheLocal();
+        notificar();
+      })
+      .catch((err) => {
+        pendingUpdateIds.delete(otimista.id);
+        console.error('Falha ao criar categoria na planilha (mantida localmente):', err);
+      });
+
+    return otimista;
   }
 
   async updateCategoria(id: string, data: Partial<Categoria>): Promise<Categoria> {
     await carregarSeguro();
     const idx = cache.categorias.findIndex((c) => c.id === id);
-    let cat: Categoria;
-    if (isConectado()) {
-      cat = await chamarRemoto('updateCategoria', { id, ...data });
-    } else {
+
+    if (!isConectado()) {
       if (idx === -1) throw new Error('Categoria não encontrada');
-      cat = { ...cache.categorias[idx], ...data, id };
+      const cat = { ...cache.categorias[idx], ...data, id };
+      cache.categorias[idx] = cat;
+      salvarCacheLocal();
+      return cat;
     }
-    if (idx === -1) cache.categorias.push(cat);
-    else cache.categorias[idx] = cat;
+
+    const otimista: Categoria = { ...(idx !== -1 ? cache.categorias[idx] : ({} as Categoria)), ...data, id };
+    if (idx === -1) cache.categorias.push(otimista);
+    else cache.categorias[idx] = otimista;
+    pendingUpdateIds.add(id);
     salvarCacheLocal();
-    return cat;
+
+    chamarRemoto('updateCategoria', { id, ...data })
+      .then((real: Categoria) => {
+        const idx2 = cache.categorias.findIndex((c) => c.id === id);
+        if (idx2 !== -1) cache.categorias[idx2] = real;
+        else cache.categorias.push(real);
+        pendingUpdateIds.delete(id);
+        salvarCacheLocal();
+        notificar();
+      })
+      .catch((err) => {
+        pendingUpdateIds.delete(id);
+        console.error('Falha ao atualizar categoria na planilha (mantida localmente):', err);
+      });
+
+    return otimista;
   }
 
   // --- Dashboard ---

@@ -22,11 +22,15 @@ export function TransacoesScreen() {
 
   useEffect(() => {
     loadData();
+    // Atualiza a lista quando a gravação em segundo plano (otimista) for
+    // confirmada pela planilha, ou quando uma atualização automática chegar.
+    const cancelar = apiService.onDadosAtualizados(() => loadData());
+    return cancelar;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mes, ano]);
 
   const loadData = async () => {
     try {
-      setLoading(true);
       setError('');
 
       // Ensure data is from June 2026 onwards
