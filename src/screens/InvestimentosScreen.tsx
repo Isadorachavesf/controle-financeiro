@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
-import { Transacao } from '@/types/index';
+import { Transacao, receitaRealizada } from '@/types/index';
 import { apiService, competenciaDe } from '@services/api';
 
 const STORAGE_RESERVA = 'cf_reserva_atual';
@@ -88,7 +88,7 @@ export function InvestimentosScreen() {
     const meses = ultimosMesesComDados(todasTransacoes).slice(-6); // até 6 últimos meses com dados
     const porMes = meses.map((chave) => {
       const doMes = todasTransacoes.filter((t) => competenciaDe(t) === chave);
-      const receitas = doMes.filter((t) => t.tipo === 'receita').reduce((s, t) => s + t.valor, 0);
+      const receitas = doMes.filter(receitaRealizada).reduce((s, t) => s + t.valor, 0);
       const despesas = doMes.filter((t) => t.tipo === 'despesa').reduce((s, t) => s + t.valor, 0);
       return { chave, receitas, despesas, sobra: receitas - despesas };
     });
@@ -111,6 +111,25 @@ export function InvestimentosScreen() {
     });
 
     return { porMes, mediaDespesas, mediaReceitas, mediaSobra, taxaPoupanca, maiorCategoria, mesesAnalisados: meses.length };
+  }, [todasTransacoes]);
+
+  // --- Receita do negócio (aba "A receber 2026"): recebido x pendente ---
+  const negocio = useMemo(() => {
+    const receitas = todasTransacoes.filter((t) => t.tipo === 'receita');
+    const recebido = receitas.filter(receitaRealizada);
+    const pendente = receitas.filter((t) => !receitaRealizada(t) && t.situacao !== 'Cancelado');
+
+    const porServico = new Map<string, number>();
+    recebido.forEach((t) => porServico.set(t.categoriaId, (porServico.get(t.categoriaId) || 0) + t.valor));
+
+    return {
+      totalRecebido: recebido.reduce((s, t) => s + t.valor, 0),
+      totalPendente: pendente.reduce((s, t) => s + t.valor, 0),
+      qtdPendente: pendente.length,
+      porServico: Array.from(porServico.entries())
+        .map(([nome, valor]) => ({ nome, valor }))
+        .sort((a, b) => b.valor - a.valor),
+    };
   }, [todasTransacoes]);
 
   // --- Reserva de emergência: alvo = 6x a média de despesas mensais ---
@@ -224,6 +243,39 @@ export function InvestimentosScreen() {
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {/* Receita do negócio (A receber 2026) */}
+      {(negocio.totalRecebido > 0 || negocio.totalPendente > 0) && (
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="font-semibold mb-1">💼 Receita do negócio</h3>
+          <p className="text-sm text-gray-500 mb-4">Da aba "A receber 2026" — consultoria, testes e parcerias.</p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            <div className="bg-green-50 rounded-lg p-4">
+              <p className="text-xs text-green-700 font-medium">Já recebido</p>
+              <p className="text-xl font-bold text-green-800">{fmt(negocio.totalRecebido)}</p>
+            </div>
+            <div className="bg-yellow-50 rounded-lg p-4">
+              <p className="text-xs text-yellow-700 font-medium">
+                A receber ({negocio.qtdPendente} cobrança{negocio.qtdPendente === 1 ? '' : 's'} em aberto)
+              </p>
+              <p className="text-xl font-bold text-yellow-800">{fmt(negocio.totalPendente)}</p>
+            </div>
+          </div>
+
+          {negocio.porServico.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-sm text-gray-600 font-medium">Recebido por tipo de serviço</p>
+              {negocio.porServico.map((s) => (
+                <div key={s.nome} className="flex justify-between text-sm border-b last:border-b-0 py-1.5">
+                  <span className="text-gray-700">{s.nome.replace('Receita: ', '')}</span>
+                  <span className="font-medium">{fmt(s.valor)}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

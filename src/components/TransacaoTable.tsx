@@ -25,6 +25,7 @@ export function TransacaoTable({ transacoes, categorias, onEdit, onDelete }: Tra
               <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Valor</th>
               <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">Tipo</th>
               <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">Método</th>
+              <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">Situação</th>
               <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">Ações</th>
             </tr>
           </thead>
@@ -45,6 +46,10 @@ export function TransacaoTable({ transacoes, categorias, onEdit, onDelete }: Tra
                 <td className="px-4 py-3 text-sm text-gray-700">
                   {tx.descricao}
                   {(() => {
+                    if (tx.tipo === 'receita') {
+                      const partes = [tx.cidade, tx.candidato].filter(Boolean) as string[];
+                      return partes.length ? <div className="text-xs text-gray-500 mt-1">{partes.join(' · ')}</div> : null;
+                    }
                     const partes = [] as string[];
                     if (tx.parcela && tx.parcela !== 'À vista') partes.push('Parcela ' + tx.parcela);
                     if (tx.quem) partes.push(tx.quem);
@@ -70,6 +75,23 @@ export function TransacaoTable({ transacoes, categorias, onEdit, onDelete }: Tra
                 </td>
                 <td className="px-4 py-3 text-sm text-center text-gray-600">
                   <span className="text-xs whitespace-nowrap">{tx.metodoPagamento || '—'}</span>
+                </td>
+                <td className="px-4 py-3 text-sm text-center">
+                  {tx.tipo === 'receita' && tx.situacao ? (
+                    <span
+                      className={`px-2 py-1 rounded text-xs font-medium whitespace-nowrap ${
+                        tx.situacao === 'Recebido'
+                          ? 'bg-green-100 text-green-800'
+                          : tx.situacao === 'Cancelado'
+                          ? 'bg-gray-100 text-gray-600'
+                          : 'bg-yellow-100 text-yellow-800'
+                      }`}
+                    >
+                      {tx.situacao}
+                    </span>
+                  ) : (
+                    <span className="text-gray-300">—</span>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-sm text-center">
                   <div className="flex gap-2 justify-center">

@@ -20,6 +20,10 @@
 var ABA_ORCAMENTOS = '_Orcamentos';
 var COLUNAS_ORCAMENTOS = ['nome', 'limiteMensal', 'corGrafico'];
 
+// Receitas do negócio (clientes, testes psicológicos, consultoria).
+var ABA_RECEBER = 'A receber 2026';
+var HEADER_RECEBER = ['DATA', 'CLIENTE', 'CIDADE', 'CANDIDATO', 'O QUE', 'VALOR', 'VIA', 'SITUAÇÃO'];
+
 // Cabeçalho padrão usado ao criar uma aba de mês que ainda não existe.
 var HEADER_PADRAO = [
   'Código', 'Data', 'Compra', 'Categoria', 'Forma de pagamento',
@@ -57,14 +61,21 @@ function handle(e, metodo) {
     switch (acao) {
       case 'bootstrap':
         // Lê as transações UMA vez e reaproveita para montar as categorias.
-        var _txs = lerTransacoes();
+        var _txs = lerTransacoes().concat(lerReceitasNegocio());
         resultado = { categorias: lerCategorias(_txs), transacoes: _txs };
         break;
-      case 'getTransacoes': resultado = lerTransacoes(); break;
+      case 'getTransacoes': resultado = lerTransacoes().concat(lerReceitasNegocio()); break;
       case 'getCategorias': resultado = lerCategorias(); break;
-      case 'createTransacao': resultado = criarTransacao(payload); break;
-      case 'updateTransacao': resultado = atualizarTransacao(payload.id, payload); break;
-      case 'deleteTransacao': deletarTransacao(payload.id); resultado = { ok: true }; break;
+      case 'createTransacao':
+        resultado = payload.tipo === 'receita' ? criarReceita(payload) : criarTransacao(payload);
+        break;
+      case 'updateTransacao':
+        resultado = ehIdDeReceber(payload.id) ? atualizarReceita(payload.id, payload) : atualizarTransacao(payload.id, payload);
+        break;
+      case 'deleteTransacao':
+        if (ehIdDeReceber(payload.id)) deletarReceita(payload.id); else deletarTransacao(payload.id);
+        resultado = { ok: true };
+        break;
       case 'createCategoria': resultado = upsertCategoria(payload); break;
       case 'updateCategoria': resultado = upsertCategoria(payload); break;
       default: resultado = { error: 'Ação desconhecida: ' + acao };
@@ -222,9 +233,11 @@ function lerCategorias(txsOpt) {
     });
   }
 
-  // nomes que aparecem nas transações (reaproveita a leitura quando possível)
+  // nomes de DESPESA que aparecem nas transações (reaproveita a leitura quando
+  // possível). Categorias de receita ("Receita: X") não entram aqui — elas não
+  // têm orçamento/limite mensal, são só uma classificação do tipo de serviço.
   (txsOpt || lerTransacoes()).forEach(function (t) {
-    if (t.categoriaId && !vistos[t.categoriaId]) { vistos[t.categoriaId] = true; nomes.push(t.categoriaId); }
+    if (t.tipo === 'despesa' && t.categoriaId && !vistos[t.categoriaId]) { vistos[t.categoriaId] = true; nomes.push(t.categoriaId); }
   });
   // inclui categorias que só existem em _Orcamentos
   Object.keys(limites).forEach(function (nome) {
@@ -270,6 +283,127 @@ function upsertCategoria(p) {
     sheet.getRange(linha, 1, 1, 3).setValues([[nome, limite, p.corGrafico || atualCor]]);
   }
   return { id: nome, nome: nome, limiteMensal: limite, corGrafico: cor, criadoEm: '' };
+}
+
+// ---------------------------------------------------------------------------
+// Receitas do negócio — aba "A receber 2026"
+// ---------------------------------------------------------------------------
+// Cada linha vira uma "transação" com tipo 'receita'. Só quando SITUAÇÃO for
+// "Recebido" o valor conta como dinheiro que já entrou de fato nos totais do
+// app (Dashboard, tendências, simulador) — as demais situações (Cobrar,
+// Cobrado - saber se pagou, Cancelado) ficam visíveis na lista, mas não
+// entram nas somas, para não inflar a receita com dinheiro que ainda não veio.
+
+var CATEGORIA_RECEITA_PREFIXO = 'Receita: ';
+
+function ehIdDeReceber(id) {
+  return String(id || '').indexOf(ABA_RECEBER + '||') === 0;
+}
+
+function garantirAbaReceber() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(ABA_RECEBER);
+  if (!sheet) {
+    sheet = ss.insertSheet(ABA_RECEBER);
+    sheet.getRange(1, 1, 1, HEADER_RECEBER.length).setValues([HEADER_RECEBER]);
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function lerReceitasNegocio() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ABA_RECEBER);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+
+  var linhas = sheet.getRange(2, 1, sheet.getLastRow() - 1, HEADER_RECEBER.length).getValues();
+  var out = [];
+  linhas.forEach(function (l, idx) {
+    var data = l[0], cliente = String(l[1] || '').trim(), cidade = String(l[2] || '').trim();
+    var candidato = String(l[3] || '').trim(), oque = String(l[4] || '').trim();
+    var valor = parseValor(l[5]);
+    var via = String(l[6] || '').trim(), situacao = String(l[7] || '').trim();
+    if (!cliente && !valor) return; // linha vazia
+
+    var dataISO = parseData(data);
+    out.push(montarReceita(idx + 2, {
+      dataTransacao: dataISO,
+      descricao: cliente,
+      cidade: cidade,
+      candidato: candidato,
+      categoriaId: CATEGORIA_RECEITA_PREFIXO + (oque || 'Outro'),
+      valor: Math.abs(valor) || 0,
+      metodoPagamento: via,
+      situacao: situacao || 'Cobrar'
+    }));
+  });
+  return out;
+}
+
+function montarReceita(linhaNum, p) {
+  var dataISO = p.dataTransacao || '';
+  return {
+    id: ABA_RECEBER + '||' + linhaNum,
+    categoriaId: p.categoriaId || (CATEGORIA_RECEITA_PREFIXO + 'Outro'),
+    categoriaNome: p.categoriaId || (CATEGORIA_RECEITA_PREFIXO + 'Outro'),
+    descricao: p.descricao || '',
+    valor: Math.abs(Number(p.valor) || 0),
+    dataTransacao: dataISO,
+    competencia: dataISO && dataISO.length >= 7 ? dataISO.substring(0, 7) : '',
+    tipo: 'receita',
+    metodoPagamento: p.metodoPagamento || '',
+    cidade: p.cidade || '',
+    candidato: p.candidato || '',
+    situacao: p.situacao || 'Cobrar',
+    parcela: '',
+    quem: '',
+    notas: '',
+    criadoEm: new Date().toISOString(),
+    atualizadoEm: new Date().toISOString()
+  };
+}
+
+function criarReceita(p) {
+  var sheet = garantirAbaReceber();
+  var oque = String(p.categoriaId || '').replace(CATEGORIA_RECEITA_PREFIXO, '');
+  var dataObj = p.dataTransacao ? new Date(p.dataTransacao + 'T00:00:00') : new Date();
+
+  sheet.appendRow([
+    dataObj,
+    p.descricao || '',
+    p.cidade || '',
+    p.candidato || '',
+    oque,
+    Number(p.valor) || 0,
+    p.metodoPagamento || '',
+    p.situacao || 'Cobrar'
+  ]);
+
+  return montarReceita(sheet.getLastRow(), p);
+}
+
+function atualizarReceita(id, p) {
+  var linhaNum = parseInt(String(id).split('||')[1], 10);
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ABA_RECEBER);
+  if (!sheet || !linhaNum) throw 'Recebimento não encontrado';
+
+  var atual = sheet.getRange(linhaNum, 1, 1, HEADER_RECEBER.length).getValues()[0];
+  if (p.dataTransacao !== undefined) atual[0] = new Date(p.dataTransacao + 'T00:00:00');
+  if (p.descricao !== undefined) atual[1] = p.descricao;
+  if (p.cidade !== undefined) atual[2] = p.cidade;
+  if (p.candidato !== undefined) atual[3] = p.candidato;
+  if (p.categoriaId !== undefined) atual[4] = String(p.categoriaId).replace(CATEGORIA_RECEITA_PREFIXO, '');
+  if (p.valor !== undefined) atual[5] = Number(p.valor) || 0;
+  if (p.metodoPagamento !== undefined) atual[6] = p.metodoPagamento;
+  if (p.situacao !== undefined) atual[7] = p.situacao;
+  sheet.getRange(linhaNum, 1, 1, HEADER_RECEBER.length).setValues([atual]);
+
+  return montarReceita(linhaNum, p);
+}
+
+function deletarReceita(id) {
+  var linhaNum = parseInt(String(id).split('||')[1], 10);
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ABA_RECEBER);
+  if (sheet && linhaNum) sheet.deleteRow(linhaNum);
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { DashboardData, Transacao } from '@/types/index';
+import { DashboardData, Transacao, receitaRealizada } from '@/types/index';
 import { apiService, competenciaDe } from '@services/api';
 
 // O controle financeiro começa em junho de 2026.
@@ -473,7 +473,7 @@ function generateTrendData(mes: number, ano: number, transacoes: Transacao[]) {
     }
     const chave = `${y}-${String(m).padStart(2, '0')}`;
     const doMes = transacoes.filter((t) => competenciaDe(t) === chave);
-    const receitas = doMes.filter((t) => t.tipo === 'receita').reduce((s, t) => s + t.valor, 0);
+    const receitas = doMes.filter(receitaRealizada).reduce((s, t) => s + t.valor, 0);
     const despesas = doMes.filter((t) => t.tipo === 'despesa').reduce((s, t) => s + t.valor, 0);
     data.push({
       mes: new Intl.DateTimeFormat('pt-BR', { month: 'short' }).format(new Date(y, m - 1)),

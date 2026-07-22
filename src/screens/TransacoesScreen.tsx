@@ -2,7 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { Transacao, Categoria } from '@/types/index';
 import { apiService } from '@services/api';
 import { TransacaoForm } from '@components/TransacaoForm';
+import { ReceitaForm } from '@components/ReceitaForm';
 import { TransacaoTable } from '@components/TransacaoTable';
+
+const MIN_MES = 6;
+const MIN_ANO = 2026;
+const antesDoMinimo = (m: number, a: number) => a < MIN_ANO || (a === MIN_ANO && m < MIN_MES);
 
 export function TransacoesScreen() {
   const [transacoes, setTransacoes] = useState<Transacao[]>([]);
@@ -10,6 +15,7 @@ export function TransacoesScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showForm, setShowForm] = useState(false);
+  const [novoTipo, setNovoTipo] = useState<'despesa' | 'receita'>('despesa');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [filtros, setFiltros] = useState({
     categoria: '',
@@ -17,8 +23,17 @@ export function TransacoesScreen() {
     dataInicio: '',
     dataFim: '',
   });
-  const [mes, setMes] = useState(new Date().getMonth() + 1);
-  const [ano, setAno] = useState(new Date().getFullYear());
+
+  const inicial = (() => {
+    const hoje = new Date();
+    let m = hoje.getMonth() + 1;
+    let a = hoje.getFullYear();
+    if (antesDoMinimo(m, a)) { m = MIN_MES; a = MIN_ANO; }
+    return { m, a };
+  })();
+  const [mes, setMes] = useState(inicial.m);
+  const [ano, setAno] = useState(inicial.a);
+  const noMinimo = mes === MIN_MES && ano === MIN_ANO;
 
   useEffect(() => {
     loadData();
@@ -32,30 +47,15 @@ export function TransacoesScreen() {
   const loadData = async () => {
     try {
       setError('');
-
-      // Ensure data is from June 2026 onwards
-      let queryMes = mes;
-      let queryAno = ano;
-      const now = new Date(ano, mes - 1);
-      const june2026 = new Date(2026, 5);
-
-      if (now < june2026) {
-        queryMes = 6;
-        queryAno = 2026;
-      }
-
       const [txs, cats] = await Promise.all([
-        apiService.getTransacoes(queryMes, queryAno),
+        apiService.getTransacoes(mes, ano),
         apiService.getCategorias(),
       ]);
-
-      setTransacoes(txs || mockTransacoes());
-      setCategorias(cats || mockCategorias());
+      setTransacoes(txs || []);
+      setCategorias(cats || []);
     } catch (err) {
       setError('Erro ao carregar transações');
       console.error(err);
-      setTransacoes(mockTransacoes());
-      setCategorias(mockCategorias());
     } finally {
       setLoading(false);
     }
@@ -78,16 +78,18 @@ export function TransacoesScreen() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Tem certeza que deseja deletar esta transação?')) return;
-
+    if (!confirm('Tem certeza que deseja excluir este lançamento?')) return;
     try {
       await apiService.deleteTransacao(id);
       await loadData();
     } catch (err) {
-      setError('Erro ao deletar transação');
+      setError('Erro ao excluir lançamento');
       console.error(err);
     }
   };
+
+  const editingTx = editingId ? transacoes.find((t) => t.id === editingId) : undefined;
+  const formularioEhReceita = editingTx ? editingTx.tipo === 'receita' : novoTipo === 'receita';
 
   const handleEdit = (tx: Transacao) => {
     setEditingId(tx.id);
@@ -97,6 +99,14 @@ export function TransacoesScreen() {
   const handleCancel = () => {
     setShowForm(false);
     setEditingId(null);
+  };
+
+  const handlePrevMonth = () => {
+    if (noMinimo) return;
+    if (mes === 1) { setMes(12); setAno(ano - 1); } else setMes(mes - 1);
+  };
+  const handleNextMonth = () => {
+    if (mes === 12) { setMes(1); setAno(ano + 1); } else setMes(mes + 1);
   };
 
   const filteredTransacoes = transacoes.filter((tx) => {
@@ -116,16 +126,14 @@ export function TransacoesScreen() {
       {/* Month Navigation */}
       <div className="flex items-center justify-between bg-white rounded-lg shadow p-4">
         <button
-          onClick={() => setMes(mes === 1 ? 12 : mes - 1)}
-          className="p-2 hover:bg-gray-100 rounded-lg transition"
+          onClick={handlePrevMonth}
+          disabled={noMinimo}
+          className="p-2 hover:bg-gray-100 rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed"
         >
           ←
         </button>
         <h2 className="text-lg font-semibold capitalize">{monthName}</h2>
-        <button
-          onClick={() => setMes(mes === 12 ? 1 : mes + 1)}
-          className="p-2 hover:bg-gray-100 rounded-lg transition"
-        >
+        <button onClick={handleNextMonth} className="p-2 hover:bg-gray-100 rounded-lg transition">
           →
         </button>
       </div>
@@ -138,13 +146,42 @@ export function TransacoesScreen() {
 
       {/* Form */}
       {showForm && (
-        <TransacaoForm
-          transacao={editingId ? transacoes.find((t) => t.id === editingId) : undefined}
-          categorias={categorias}
-          onSave={handleSave}
-          onCancel={handleCancel}
-          isLoading={loading}
-        />
+        <div className="space-y-3">
+          {!editingId && (
+            <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setNovoTipo('despesa')}
+                className={`px-4 py-2 text-sm font-medium transition ${
+                  novoTipo === 'despesa' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                💳 Despesa
+              </button>
+              <button
+                type="button"
+                onClick={() => setNovoTipo('receita')}
+                className={`px-4 py-2 text-sm font-medium transition ${
+                  novoTipo === 'receita' ? 'bg-green-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                💰 Recebimento (negócio)
+              </button>
+            </div>
+          )}
+
+          {formularioEhReceita ? (
+            <ReceitaForm transacao={editingTx} onSave={handleSave} onCancel={handleCancel} isLoading={loading} />
+          ) : (
+            <TransacaoForm
+              transacao={editingTx}
+              categorias={categorias}
+              onSave={handleSave}
+              onCancel={handleCancel}
+              isLoading={loading}
+            />
+          )}
+        </div>
       )}
 
       {/* Controls */}
@@ -154,9 +191,9 @@ export function TransacoesScreen() {
             setEditingId(null);
             setShowForm(!showForm);
           }}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition"
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition whitespace-nowrap"
         >
-          {showForm ? 'Cancelar' : '+ Nova Transação'}
+          {showForm ? 'Cancelar' : '+ Novo Lançamento'}
         </button>
 
         {/* Filters */}
@@ -225,7 +262,7 @@ export function TransacoesScreen() {
 
       {filteredTransacoes.length === 0 && !loading && (
         <div className="bg-white rounded-lg shadow p-8 text-center">
-          <p className="text-gray-600 text-lg">Nenhuma transação encontrada</p>
+          <p className="text-gray-600 text-lg">Nenhum lançamento encontrado</p>
           <button
             onClick={() => {
               setEditingId(null);
@@ -233,37 +270,10 @@ export function TransacoesScreen() {
             }}
             className="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition"
           >
-            Adicionar primeira transação
+            Adicionar primeiro lançamento
           </button>
         </div>
       )}
     </div>
   );
-}
-
-function mockTransacoes(): Transacao[] {
-  return [
-    {
-      id: '1',
-      categoriaId: '1',
-      categoriaNome: 'Combustível',
-      descricao: 'Gasolina no posto',
-      valor: 150,
-      dataTransacao: '2026-06-20',
-      tipo: 'despesa',
-      metodoPagamento: 'cartao',
-      criadoEm: new Date().toISOString(),
-      atualizadoEm: new Date().toISOString(),
-    },
-  ];
-}
-
-function mockCategorias(): Categoria[] {
-  return [
-    { id: '1', nome: 'Combustível', limiteMensal: 600, corGrafico: '#3b82f6', criadoEm: '' },
-    { id: '2', nome: 'Comida', limiteMensal: 800, corGrafico: '#ef4444', criadoEm: '' },
-    { id: '3', nome: 'Energia', limiteMensal: 300, corGrafico: '#10b981', criadoEm: '' },
-    { id: '4', nome: 'Internet', limiteMensal: 150, corGrafico: '#f59e0b', criadoEm: '' },
-    { id: '5', nome: 'Academia', limiteMensal: 200, corGrafico: '#8b5cf6', criadoEm: '' },
-  ];
 }

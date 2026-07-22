@@ -1,4 +1,4 @@
-import { Transacao, Categoria, DashboardData, SincronizacaoStatus } from '@/types/index';
+import { Transacao, Categoria, DashboardData, SincronizacaoStatus, receitaRealizada } from '@/types/index';
 
 // ---------------------------------------------------------------------------
 // Camada de dados do aplicativo.
@@ -255,11 +255,12 @@ export function competenciaDe(tx: Transacao): string {
   return tx.dataTransacao ? tx.dataTransacao.slice(0, 7) : '';
 }
 
-// Mantém apenas lançamentos das ABAS DE MÊS. Ignora linhas vindas de abas
-// auxiliares da planilha ("Base de dados", "A receber 2026", "CNPJs clientes"…),
-// que consolidam/duplicam dados e inflavam os totais. Lançamentos locais
-// (id sem "||") são sempre mantidos.
+// Mantém lançamentos das ABAS DE MÊS + receitas do negócio ("A receber
+// 2026", lidas à parte pelo Apps Script). Ignora abas auxiliares de
+// consolidação ("Base de dados", "CNPJs clientes"…), que duplicavam totais.
+// Lançamentos locais (id sem "||") são sempre mantidos.
 function ehDeAbaMensal(tx: Transacao): boolean {
+  if (tx.tipo === 'receita') return true;
   if (!tx.id || tx.id.indexOf('||') < 0) return true;
   return competenciaDeNomeAba(tx.id.split('||')[0]) !== '';
 }
@@ -484,7 +485,8 @@ class ApiService {
     await carregarSeguro();
     const txsMes = cache.transacoes.filter((t) => pertenceAo(t, mes, ano));
 
-    const totalReceitas = txsMes.filter((t) => t.tipo === 'receita').reduce((s, t) => s + t.valor, 0);
+    // Só "Recebido" conta como dinheiro que já entrou (não infla com pendências).
+    const totalReceitas = txsMes.filter(receitaRealizada).reduce((s, t) => s + t.valor, 0);
     const totalDespesas = txsMes.filter((t) => t.tipo === 'despesa').reduce((s, t) => s + t.valor, 0);
 
     const porCategoria = cache.categorias.map((categoria) => {
