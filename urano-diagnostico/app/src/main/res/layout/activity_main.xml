@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#FFF8F1">
+<LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="18dp">
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Gelato&amp;Grano · Urano" android:textStyle="bold" android:textSize="24sp" android:textColor="#4A2E20" />
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Diagnóstico Bluetooth clássico / RFCOMM — não grava dados de produção" android:textSize="13sp" android:textColor="#6E5A50" android:layout_marginBottom="14dp" />
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Dispositivo pareado" android:textStyle="bold" />
+    <Spinner android:id="@+id/deviceSpinner" android:layout_width="match_parent" android:layout_height="54dp" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+        <Button android:id="@+id/refreshBtn" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Atualizar" />
+        <Button android:id="@+id/settingsBtn" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Bluetooth" />
+    </LinearLayout>
+    <Button android:id="@+id/connectBtn" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Conectar à balança" />
+    <Button android:id="@+id/disconnectBtn" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Desconectar" />
+    <TextView android:id="@+id/statusText" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Status: aguardando" android:textStyle="bold" android:padding="12dp" android:background="#F2E2D8" android:layout_marginTop="10dp" />
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Peso interpretado" android:textStyle="bold" android:layout_marginTop="14dp" />
+    <TextView android:id="@+id/weightText" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="— g" android:textSize="34sp" android:textStyle="bold" android:textColor="#9C4F2E" />
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Configure na balança: [F][3] → PROT F (preferido), PROT 1 ou PROT 3." android:textColor="#6E5A50" android:layout_marginBottom="10dp" />
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Frames recebidos" android:textStyle="bold" />
+    <TextView android:id="@+id/logText" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="220dp" android:textSize="12sp" android:fontFamily="monospace" android:textIsSelectable="true" android:padding="10dp" android:background="#FFFFFF" />
+    <Button android:id="@+id/clearBtn" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Limpar log" />
+</LinearLayout></ScrollView>
