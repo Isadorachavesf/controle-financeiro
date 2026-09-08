@@ -99,7 +99,7 @@ public class MainActivity extends Activity {
     private Integer parseUrano(byte[] a){
         for(int i=0;i+8<a.length;i++) if((a[i]&0xFF)==0x02 && (a[i+8]&0xFF)==0x03){
             String t=new String(a,i+1,7,StandardCharsets.US_ASCII).trim().replace(',','.');
-            if(t.matches("-?\\d{1,2}\\.\\d{3}")){try{double kg=Double.parseDouble(t);if(kg>=0)return (int)Math.round(kg*1000.0);}catch(Exception ignored){}}
+            if(t.matches("[+-]?\\d{1,2}\\.\\d{3}")){try{double kg=Double.parseDouble(t);if(kg>=0)return (int)Math.round(kg*1000.0);}catch(Exception ignored){}}
         }
         for(int i=0;i+6<a.length;i++) if((a[i]&0xFF)==0x02 && (a[i+6]&0xFF)==0x03){
             String t=new String(a,i+1,5,StandardCharsets.US_ASCII).trim();
